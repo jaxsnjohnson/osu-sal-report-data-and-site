@@ -87,11 +87,6 @@ function runSearch() {
         // 2. Type Match (Classified / Unclassified)
         if (typeFilter !== 'all') {
             // Check if ANY snapshot in timeline matches the source criteria
-            // "Classified" -> source contains "class" but not "unclass" (or logic from filenames)
-            // Actually, simplest logic based on filenames:
-            // Unclassified: contains "unclass" (case insensitive)
-            // Classified: contains "class" AND NOT "unclass"
-
             const hasType = person.Timeline.some(snap => {
                 const src = snap.Source.toLowerCase();
                 const isUnclass = src.includes('unclass');
@@ -127,9 +122,17 @@ function generateCardHTML(name, idx) {
 
     return `
     <div class="card" id="${cardId}">
-        <div class="card-header" onclick="toggleCard('${cardId}')">
+        <div class="card-header"
+             role="button"
+             tabindex="0"
+             aria-expanded="false"
+             onclick="toggleCard('${cardId}')"
+             onkeydown="if(event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleCard('${cardId}'); }">
             <div class="person-info">
-                <h2>${name}</h2>
+                <h2>
+                    <span class="arrow" aria-hidden="true">▶</span>
+                    ${name}
+                </h2>
                 <p>Home Org: ${person.Meta["Home Orgn"] || 'N/A'}</p>
             </div>
             <div class="latest-stat">
@@ -160,7 +163,7 @@ function generateCardHTML(name, idx) {
                                 </td>
                                 <td>
                                     <div style="font-weight:600;">${job['Job Title'] || ''}</div>
-                                    <div style="font-size:0.85rem; color:#64748b;">${job['Job Orgn'] || ''}</div>
+                                    <div style="font-size:0.85rem; color:var(--text-muted);">${job['Job Orgn'] || ''}</div>
                                 </td>
                                 <td>
                                     <span class="badge badge-type">${job['Job Type'] || '?'}</span>
@@ -237,7 +240,15 @@ function updateStats() {
 
 function toggleCard(id) {
     const el = document.getElementById(id);
-    if(el) el.classList.toggle('expanded');
+    if(el) {
+        el.classList.toggle('expanded');
+        // Update ARIA attribute
+        const header = el.querySelector('.card-header');
+        if (header) {
+            const isExpanded = el.classList.contains('expanded');
+            header.setAttribute('aria-expanded', isExpanded);
+        }
+    }
 }
 
 // Infinite Scroll Observer

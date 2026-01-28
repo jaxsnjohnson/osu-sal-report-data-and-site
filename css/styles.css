@@ -1,11 +1,22 @@
 :root {
-    --primary: #2563eb;
-    --bg-body: #f1f5f9;
-    --bg-card: #ffffff;
-    --text-main: #1e293b;
-    --text-muted: #64748b;
-    --border: #e2e8f0;
-    --success: #16a34a;
+    /* OSU Dark Theme */
+    --primary: #D73F09; /* OSU Orange */
+    --primary-hover: #b83407;
+    --bg-body: #181818;
+    --bg-card: #2d2d2d;
+    --bg-input: #3a3a3a;
+    --bg-history: #252525;
+    --bg-hover: #353535;
+
+    --text-main: #f3f4f6;
+    --text-muted: #9ca3af;
+    --text-inverse: #ffffff;
+
+    --border: #404040;
+    --border-light: #525252;
+
+    --success: #22c55e;
+    --success-muted: #166534;
 }
 
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: var(--bg-body); color: var(--text-main); margin: 0; padding: 20px; }
@@ -27,26 +38,30 @@ h1 { font-size: 1.5rem; margin-bottom: 10px; color: var(--text-main); }
     flex: 2;
     padding: 16px;
     font-size: 16px;
-    border: 1px solid #cbd5e1;
+    border: 1px solid var(--border);
+    background-color: var(--bg-input);
+    color: var(--text-main);
     border-radius: 12px;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
     outline: none;
-    transition: border-color 0.2s;
+    transition: border-color 0.2s, box-shadow 0.2s;
     min-width: 200px;
 }
-.search-bar:focus { border-color: var(--primary); }
+.search-bar:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(215, 63, 9, 0.2); }
 
 .filter-select, .filter-input {
     flex: 1;
     padding: 16px;
     font-size: 16px;
-    border: 1px solid #cbd5e1;
+    border: 1px solid var(--border);
     border-radius: 12px;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    background-color: var(--bg-input);
+    color: var(--text-main);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
     outline: none;
     min-width: 150px;
-    background: white;
 }
+.filter-select:focus, .filter-input:focus { border-color: var(--primary); }
 
 /* Stats Bar */
 .stats {
@@ -57,12 +72,13 @@ h1 { font-size: 1.5rem; margin-bottom: 10px; color: var(--text-main); }
 .card {
     background: var(--bg-card);
     border-radius: 12px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
     margin-bottom: 12px;
     overflow: hidden;
     transition: transform 0.1s ease;
+    border: 1px solid var(--border);
 }
-.card:hover { transform: translateY(-1px); box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+.card:hover { transform: translateY(-1px); box-shadow: 0 4px 6px rgba(0,0,0,0.4); border-color: var(--border-light); }
 
 /* Card Header (Always Visible) */
 .card-header {
@@ -72,10 +88,45 @@ h1 { font-size: 1.5rem; margin-bottom: 10px; color: var(--text-main); }
     justify-content: space-between;
     align-items: center;
     user-select: none;
+    background-color: transparent;
+    transition: background-color 0.2s;
+    outline: none;
+}
+.card-header:hover {
+    background-color: var(--bg-hover);
+}
+/* Accessible Focus State */
+.card-header:focus-visible {
+    background-color: var(--bg-hover);
+    box-shadow: inset 0 0 0 2px var(--primary);
 }
 
-.person-info h2 { margin: 0 0 5px 0; font-size: 1.1rem; color: var(--primary); }
+.person-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.person-info h2 {
+    margin: 0 0 5px 0;
+    font-size: 1.1rem;
+    color: var(--primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
 .person-info p { margin: 0; font-size: 0.85rem; color: var(--text-muted); }
+
+/* Rotating Arrow */
+.arrow {
+    display: inline-block;
+    font-size: 0.8em;
+    transition: transform 0.2s ease;
+    color: var(--text-muted);
+}
+.card.expanded .arrow {
+    transform: rotate(90deg);
+    color: var(--primary);
+}
 
 .latest-stat { text-align: right; }
 .latest-salary { font-weight: 700; color: var(--success); font-family: monospace; font-size: 1.1rem; }
@@ -85,31 +136,31 @@ h1 { font-size: 1.5rem; margin-bottom: 10px; color: var(--text-main); }
 .history {
     display: none; /* Hidden by default */
     border-top: 1px solid var(--border);
-    background-color: #f8fafc;
+    background-color: var(--bg-history);
     padding: 20px;
 }
 .card.expanded .history { display: block; }
-.card.expanded .card-header { background-color: #eff6ff; }
+.card.expanded .card-header { background-color: var(--bg-hover); }
 
 /* History Table */
 table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 th { text-align: left; color: var(--text-muted); font-weight: 600; padding-bottom: 10px; border-bottom: 2px solid var(--border); }
 td { padding: 12px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
 
-/* Badges */
+/* Badges - Dark Theme Adapted */
 .badge {
     display: inline-block; padding: 2px 8px; border-radius: 4px;
     font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
 }
-.badge-source { background: #e2e8f0; color: #475569; margin-top: 4px; }
-.badge-type { background: #dbeafe; color: #1e40af; }
+.badge-source { background: #3f3f46; color: #cbd5e1; margin-top: 4px; }
+.badge-type { background: #172554; color: #93c5fd; }
 
-/* Salary Term Badge (12 mo / 9 mo) */
+/* Salary Term Badge */
 .term-badge {
     display: inline-block;
-    background: #eef2ff;
-    color: #4f46e5;
-    border: 1px solid #c7d2fe;
+    background: #312e81;
+    color: #a5b4fc;
+    border: 1px solid #4338ca;
     border-radius: 4px;
     padding: 1px 5px;
     font-size: 0.7rem;
@@ -125,3 +176,18 @@ td { padding: 12px 0; border-bottom: 1px solid var(--border); vertical-align: to
 /* Utility */
 .hidden { display: none; }
 .loader-sentinel { height: 50px; margin: 20px 0; text-align: center; color: var(--text-muted); }
+
+/* Scrollbar styling for dark mode */
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-body);
+}
+::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #777;
+}
