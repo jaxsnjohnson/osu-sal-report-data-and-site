@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Interactive explorer for personnel history data, including salary analysis, classification stats, and timeline tracking.">
+    <meta name="keywords" content="personnel, salary, history, explorer, data visualization">
     <title>Personnel History Explorer</title>
     <link rel="stylesheet" href="css/styles.css">
 </head>
@@ -10,9 +12,44 @@
 
 <div class="container">
     <div class="header">
-        <h1>Personnel History</h1>
+        <div class="title-row">
+            <h1>Personnel History</h1>
+            <button id="info-btn" class="icon-btn" aria-label="About this project">?</button>
+        </div>
+
+        <!-- Stats Dashboard -->
+        <div id="stats-dashboard" class="dashboard hidden">
+            <div class="stat-card">
+                <div class="stat-label">Total Personnel</div>
+                <div class="stat-value" id="stat-total">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Salary Gap</div>
+                <div class="stat-value" id="stat-gap">-</div>
+                <div class="stat-sub" id="stat-gap-range">Max - Min</div>
+            </div>
+            <div class="stat-card wide">
+                <div class="stat-label">Classification Split</div>
+                <div class="bar-chart-container">
+                    <div class="bar-chart">
+                        <div id="bar-classified" class="bar-segment classified" style="width: 50%"></div>
+                        <div id="bar-unclassified" class="bar-segment unclassified" style="width: 50%"></div>
+                    </div>
+                    <div class="bar-legend">
+                        <span class="legend-item"><span class="dot classified"></span> Classified (<span id="count-classified">0</span>)</span>
+                        <span class="legend-item"><span class="dot unclassified"></span> Unclassified (<span id="count-unclassified">0</span>)</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="search-container">
             <input type="text" id="search" class="search-bar" placeholder="Search name, org... (Ctrl+F)">
+
+            <div class="salary-inputs">
+                <input type="number" id="salary-min" class="filter-input" placeholder="Min Salary">
+                <input type="number" id="salary-max" class="filter-input" placeholder="Max Salary">
+            </div>
 
             <select id="type-filter" class="filter-select">
                 <option value="all">All Types</option>
@@ -30,6 +67,23 @@
 </div>
 
 <script src="js/app.js"></script>
+
+<!-- About Modal -->
+<div id="info-modal" class="modal hidden">
+    <div class="modal-content">
+        <button id="close-modal" class="close" aria-label="Close modal">&times;</button>
+        <h2>About Personnel Explorer</h2>
+        <p>This tool allows you to explore personnel history data with ease.</p>
+        <h3>Features</h3>
+        <ul>
+            <li><strong>Interactive Search:</strong> Filter by name, organization, role, and salary.</li>
+            <li><strong>Dynamic Stats:</strong> See real-time analysis of the filtered dataset.</li>
+            <li><strong>Deep History:</strong> Expand cards to view detailed job timelines.</li>
+            <li><strong>Accessibility:</strong> Designed with high contrast and keyboard navigation in mind.</li>
+        </ul>
+        <p class="modal-footer">Designed by Palette 🎨</p>
+    </div>
+</div>
 
 </body>
 </html>

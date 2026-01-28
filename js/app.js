@@ -1,9 +1,16 @@
 // Utility: Format currency safely
 const formatMoney = (amount) => {
-    if (!amount) return '-';
+    if (!amount && amount !== 0) return '-';
     const num = parseFloat(amount.toString().replace(/,/g, ''));
     if (isNaN(num)) return amount;
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(num);
+};
+
+// Utility: Clean money string to number
+const cleanMoney = (val) => {
+    if (!val) return 0;
+    if (typeof val === 'number') return val;
+    return parseFloat(val.toString().replace(/,/g, '')) || 0;
 };
 
 // Utility: Format date nicely
@@ -25,7 +32,9 @@ const state = {
     filters: {
         text: '',
         type: 'all', // all, classified, unclassified
-        role: ''
+        role: '',
+        minSalary: null,
+        maxSalary: null
     }
 };
 
@@ -34,9 +43,20 @@ const els = {
     searchInput: document.getElementById('search'),
     typeSelect: document.getElementById('type-filter'),
     roleInput: document.getElementById('role-filter'),
+    salaryMin: document.getElementById('salary-min'),
+    salaryMax: document.getElementById('salary-max'),
     results: document.getElementById('results'),
     stats: document.getElementById('stats-bar'),
-    roleDatalist: document.getElementById('role-list')
+    roleDatalist: document.getElementById('role-list'),
+    // Dashboard Elements
+    dashboard: document.getElementById('stats-dashboard'),
+    statTotal: document.getElementById('stat-total'),
+    statGap: document.getElementById('stat-gap'),
+    statGapRange: document.getElementById('stat-gap-range'),
+    barClassified: document.getElementById('bar-classified'),
+    barUnclassified: document.getElementById('bar-unclassified'),
+    countClassified: document.getElementById('count-classified'),
+    countUnclassified: document.getElementById('count-unclassified')
 };
 
 // Initialization
@@ -75,6 +95,7 @@ function runSearch() {
     const term = state.filters.text.toLowerCase();
     const typeFilter = state.filters.type;
     const roleFilter = state.filters.role.toLowerCase();
+    const { minSalary, maxSalary } = state.filters;
 
     state.filteredKeys = state.masterKeys.filter(name => {
         const person = state.masterData[name];
@@ -86,12 +107,6 @@ function runSearch() {
 
         // 2. Type Match (Classified / Unclassified)
         if (typeFilter !== 'all') {
-            // Check if ANY snapshot in timeline matches the source criteria
-            // "Classified" -> source contains "class" but not "unclass" (or logic from filenames)
-            // Actually, simplest logic based on filenames:
-            // Unclassified: contains "unclass" (case insensitive)
-            // Classified: contains "class" AND NOT "unclass"
-
             const hasType = person.Timeline.some(snap => {
                 const src = snap.Source.toLowerCase();
                 const isUnclass = src.includes('unclass');
@@ -110,12 +125,74 @@ function runSearch() {
             if (!hasRole) return false;
         }
 
+        // 4. Salary Range Match (Based on LATEST snapshot)
+        if (minSalary !== null || maxSalary !== null) {
+            const lastSnapshot = person.Timeline[person.Timeline.length - 1];
+            const lastJob = lastSnapshot.Jobs[0] || {};
+            const salary = cleanMoney(lastJob['Annual Salary Rate']);
+
+            if (minSalary !== null && salary < minSalary) return false;
+            if (maxSalary !== null && salary > maxSalary) return false;
+        }
+
         return true;
     });
 
     state.visibleCount = state.batchSize; // Reset scroll
     renderInitial();
     updateStats();
+
+    // Update Dashboard Stats
+    const stats = calculateStats(state.filteredKeys);
+    updateDashboard(stats);
+}
+
+function calculateStats(keys) {
+    let min = Infinity;
+    let max = -Infinity;
+    let classified = 0;
+    let unclassified = 0;
+
+    keys.forEach(key => {
+        const p = state.masterData[key];
+        const lastSnap = p.Timeline[p.Timeline.length - 1];
+        const lastJob = lastSnap.Jobs[0] || {};
+        const salary = cleanMoney(lastJob['Annual Salary Rate']);
+
+        if (salary > 0) {
+            if (salary < min) min = salary;
+            if (salary > max) max = salary;
+        }
+
+        // Classification based on source file name
+        const src = lastSnap.Source.toLowerCase();
+        if (src.includes('unclass')) {
+            unclassified++;
+        } else {
+            classified++;
+        }
+    });
+
+    if (min === Infinity) min = 0;
+    if (max === -Infinity) max = 0;
+
+    return { count: keys.length, min, max, classified, unclassified };
+}
+
+function updateDashboard(stats) {
+    els.dashboard.classList.remove('hidden');
+    els.statTotal.textContent = stats.count.toLocaleString();
+    els.statGap.textContent = formatMoney(stats.max - stats.min);
+    els.statGapRange.textContent = `${formatMoney(stats.min)} - ${formatMoney(stats.max)}`;
+
+    const totalTypes = stats.classified + stats.unclassified;
+    const classPct = totalTypes ? (stats.classified / totalTypes) * 100 : 0;
+    const unclassPct = totalTypes ? (stats.unclassified / totalTypes) * 100 : 0;
+
+    els.barClassified.style.width = `${classPct}%`;
+    els.barUnclassified.style.width = `${unclassPct}%`;
+    els.countClassified.textContent = stats.classified.toLocaleString();
+    els.countUnclassified.textContent = stats.unclassified.toLocaleString();
 }
 
 function generateCardHTML(name, idx) {
@@ -284,6 +361,27 @@ els.roleInput.addEventListener('input', debounce((e) => {
     state.filters.role = e.target.value;
     runSearch();
 }, 300));
+
+els.salaryMin.addEventListener('input', debounce((e) => {
+    state.filters.minSalary = e.target.value ? parseFloat(e.target.value) : null;
+    runSearch();
+}, 300));
+
+els.salaryMax.addEventListener('input', debounce((e) => {
+    state.filters.maxSalary = e.target.value ? parseFloat(e.target.value) : null;
+    runSearch();
+}, 300));
+
+// Modal Logic
+const modal = document.getElementById('info-modal');
+const infoBtn = document.getElementById('info-btn');
+const closeBtn = document.getElementById('close-modal');
+
+if (infoBtn && modal && closeBtn) {
+    infoBtn.onclick = () => modal.classList.remove('hidden');
+    closeBtn.onclick = () => modal.classList.add('hidden');
+    window.onclick = (e) => { if (e.target == modal) modal.classList.add('hidden'); }
+}
 
 // Ctrl+F Trap
 document.addEventListener('keydown', (e) => {

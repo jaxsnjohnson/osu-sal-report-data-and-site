@@ -125,3 +125,129 @@ td { padding: 12px 0; border-bottom: 1px solid var(--border); vertical-align: to
 /* Utility */
 .hidden { display: none; }
 .loader-sentinel { height: 50px; margin: 20px 0; text-align: center; color: var(--text-muted); }
+
+/* Dashboard & Header Extras */
+.title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.icon-btn {
+    background: #e2e8f0;
+    border: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    color: var(--text-muted);
+    font-weight: bold;
+    font-size: 1.1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+}
+.icon-btn:hover { background: #cbd5e1; color: var(--text-main); }
+
+/* Stats Dashboard */
+.dashboard {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+    animation: fadeIn 0.4s ease-out;
+}
+
+.stat-card {
+    background: var(--bg-card);
+    padding: 16px;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.stat-card.wide {
+    grid-column: span 2;
+}
+@media (max-width: 768px) {
+    .stat-card.wide { grid-column: span 1; }
+}
+
+.stat-label { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 5px; }
+.stat-value { font-size: 1.5rem; font-weight: 700; color: var(--text-main); font-family: monospace; }
+.stat-sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; }
+
+/* Bar Chart */
+.bar-chart-container { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.bar-chart {
+    display: flex;
+    height: 12px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #e2e8f0;
+}
+.bar-segment { height: 100%; transition: width 0.5s ease; }
+.bar-segment.classified { background-color: var(--primary); }
+.bar-segment.unclassified { background-color: #f59e0b; /* Orange-ish */ }
+
+.bar-legend { display: flex; gap: 15px; font-size: 0.8rem; color: var(--text-muted); }
+.legend-item { display: flex; align-items: center; gap: 6px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; }
+.dot.classified { background-color: var(--primary); }
+.dot.unclassified { background-color: #f59e0b; }
+
+/* Filter Inputs */
+.salary-inputs {
+    display: flex;
+    gap: 10px;
+    flex: 1 1 250px;
+    min-width: 250px;
+}
+/* Hide spin buttons for number input */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type=number] { -moz-appearance: textfield; }
+
+
+/* Modal */
+.modal {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background-color: rgba(0,0,0,0.5);
+    display: flex; justify-content: center; align-items: center;
+    z-index: 1000;
+    backdrop-filter: blur(2px);
+    opacity: 1;
+    transition: opacity 0.3s ease;
+}
+.modal.hidden { display: none; opacity: 0; pointer-events: none; }
+
+.modal-content {
+    background: white;
+    padding: 30px;
+    border-radius: 16px;
+    max-width: 500px;
+    width: 90%;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+    position: relative;
+    animation: slideUp 0.3s ease;
+}
+.close {
+    position: absolute; top: 15px; right: 20px; font-size: 24px; cursor: pointer; color: var(--text-muted);
+    background: none; border: none; padding: 0; line-height: 1;
+}
+.close:hover { color: var(--text-main); }
+.modal-footer { margin-top: 20px; font-size: 0.85rem; color: var(--text-muted); text-align: center; border-top: 1px solid var(--border); padding-top: 15px; }
+.modal-content h2 { margin-top: 0; color: var(--primary); }
+.modal-content h3 { font-size: 1rem; margin-top: 20px; }
+.modal-content ul { padding-left: 20px; color: #475569; }
+.modal-content li { margin-bottom: 8px; }
+
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
