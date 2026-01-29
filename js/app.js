@@ -51,12 +51,26 @@ const els = {
     // Dashboard Elements
     dashboard: document.getElementById('stats-dashboard'),
     statTotal: document.getElementById('stat-total'),
-    statGap: document.getElementById('stat-gap'),
-    statGapRange: document.getElementById('stat-gap-range'),
+    statMedian: document.getElementById('stat-median'),
     barClassified: document.getElementById('bar-classified'),
     barUnclassified: document.getElementById('bar-unclassified'),
     countClassified: document.getElementById('count-classified'),
-    countUnclassified: document.getElementById('count-unclassified')
+    countUnclassified: document.getElementById('count-unclassified'),
+    // New Chart Elements
+    orgLeaderboard: document.getElementById('org-leaderboard'),
+    tenureChart: document.getElementById('tenure-chart'),
+    ticks: {
+        p10: document.getElementById('tick-p10'),
+        p25: document.getElementById('tick-p25'),
+        p50: document.getElementById('tick-p50'),
+        p75: document.getElementById('tick-p75'),
+        p90: document.getElementById('tick-p90'),
+    },
+    vals: {
+        p10: document.getElementById('val-p10'),
+        p50: document.getElementById('val-p50'),
+        p90: document.getElementById('val-p90'),
+    }
 };
 
 // Initialization
@@ -152,6 +166,11 @@ function calculateStats(keys) {
     let max = -Infinity;
     let classified = 0;
     let unclassified = 0;
+    let salaries = [];
+    let orgs = {};
+    let tenure = { t0_2: 0, t2_5: 0, t5_10: 0, t10_plus: 0 };
+
+    const now = new Date();
 
     keys.forEach(key => {
         const p = state.masterData[key];
@@ -159,40 +178,137 @@ function calculateStats(keys) {
         const lastJob = lastSnap.Jobs[0] || {};
         const salary = cleanMoney(lastJob['Annual Salary Rate']);
 
+        // Salary Stats
         if (salary > 0) {
             if (salary < min) min = salary;
             if (salary > max) max = salary;
+            salaries.push(salary);
         }
 
-        // Classification based on source file name
+        // Classification
         const src = lastSnap.Source.toLowerCase();
-        if (src.includes('unclass')) {
-            unclassified++;
-        } else {
-            classified++;
+        if (src.includes('unclass')) unclassified++;
+        else classified++;
+
+        // Organizations
+        const org = personOrg(p) || 'Unknown';
+        orgs[org] = (orgs[org] || 0) + 1;
+
+        // Tenure
+        const hiredStr = p.Meta['First Hired'];
+        if (hiredStr) {
+            const hiredDate = new Date(hiredStr);
+            if (!isNaN(hiredDate)) {
+                const years = (now - hiredDate) / (1000 * 60 * 60 * 24 * 365.25);
+                if (years < 2) tenure.t0_2++;
+                else if (years < 5) tenure.t2_5++;
+                else if (years < 10) tenure.t5_10++;
+                else tenure.t10_plus++;
+            }
         }
     });
 
     if (min === Infinity) min = 0;
     if (max === -Infinity) max = 0;
 
-    return { count: keys.length, min, max, classified, unclassified };
+    // Percentiles
+    salaries.sort((a, b) => a - b);
+    const getP = (p) => {
+        if (!salaries.length) return 0;
+        const idx = Math.floor((p / 100) * (salaries.length - 1));
+        return salaries[idx];
+    };
+
+    const percentiles = {
+        min, max,
+        p10: getP(10),
+        p25: getP(25),
+        p50: getP(50), // Median
+        p75: getP(75),
+        p90: getP(90)
+    };
+
+    // Top Orgs
+    const sortedOrgs = Object.entries(orgs)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5);
+
+    return {
+        count: keys.length,
+        percentiles,
+        classified,
+        unclassified,
+        topOrgs: sortedOrgs,
+        tenure
+    };
+}
+
+function personOrg(p) {
+    // Try Meta Home Orgn first, then job orgn
+    if (p.Meta['Home Orgn']) return p.Meta['Home Orgn'];
+    const lastSnap = p.Timeline[p.Timeline.length - 1];
+    if (lastSnap.Jobs[0]) return lastSnap.Jobs[0]['Job Orgn'];
+    return null;
 }
 
 function updateDashboard(stats) {
     els.dashboard.classList.remove('hidden');
     els.statTotal.textContent = stats.count.toLocaleString();
-    els.statGap.textContent = formatMoney(stats.max - stats.min);
-    els.statGapRange.textContent = `${formatMoney(stats.min)} - ${formatMoney(stats.max)}`;
+    els.statMedian.textContent = formatMoney(stats.percentiles.p50);
 
+    // Classification
     const totalTypes = stats.classified + stats.unclassified;
     const classPct = totalTypes ? (stats.classified / totalTypes) * 100 : 0;
     const unclassPct = totalTypes ? (stats.unclassified / totalTypes) * 100 : 0;
-
     els.barClassified.style.width = `${classPct}%`;
     els.barUnclassified.style.width = `${unclassPct}%`;
     els.countClassified.textContent = stats.classified.toLocaleString();
     els.countUnclassified.textContent = stats.unclassified.toLocaleString();
+
+    // Percentiles
+    const { min, max, p10, p25, p50, p75, p90 } = stats.percentiles;
+    const range = max - min || 1; // Avoid divide by zero
+
+    // Position ticks (relative to min/max)
+    const getPos = (val) => ((val - min) / range) * 100;
+
+    els.ticks.p10.style.left = `${getPos(p10)}%`;
+    els.ticks.p25.style.left = `${getPos(p25)}%`;
+    els.ticks.p50.style.left = `${getPos(p50)}%`;
+    els.ticks.p75.style.left = `${getPos(p75)}%`;
+    els.ticks.p90.style.left = `${getPos(p90)}%`;
+
+    els.vals.p10.textContent = formatMoney(p10);
+    els.vals.p50.textContent = formatMoney(p50);
+    els.vals.p90.textContent = formatMoney(p90);
+
+    // Tenure Chart
+    const tTotal = stats.tenure.t0_2 + stats.tenure.t2_5 + stats.tenure.t5_10 + stats.tenure.t10_plus || 1;
+    const tPcts = [
+        (stats.tenure.t0_2 / tTotal) * 100,
+        (stats.tenure.t2_5 / tTotal) * 100,
+        (stats.tenure.t5_10 / tTotal) * 100,
+        (stats.tenure.t10_plus / tTotal) * 100
+    ];
+
+    els.tenureChart.innerHTML = `
+        <div class="tenure-seg t1" style="width:${tPcts[0]}%" title="< 2 Years: ${stats.tenure.t0_2}"></div>
+        <div class="tenure-seg t2" style="width:${tPcts[1]}%" title="2-5 Years: ${stats.tenure.t2_5}"></div>
+        <div class="tenure-seg t3" style="width:${tPcts[2]}%" title="5-10 Years: ${stats.tenure.t5_10}"></div>
+        <div class="tenure-seg t4" style="width:${tPcts[3]}%" title="10+ Years: ${stats.tenure.t10_plus}"></div>
+    `;
+
+    // Leaderboard
+    const maxCount = stats.topOrgs[0] ? stats.topOrgs[0][1] : 1;
+    els.orgLeaderboard.innerHTML = stats.topOrgs.map(([name, count]) => `
+        <div class="lb-row">
+            <div class="lb-label" title="${name}">${name}</div>
+            <div class="lb-bar-container">
+                <div class="lb-bar" style="width: ${(count/maxCount)*100}%"></div>
+                <div class="lb-val">${count}</div>
+            </div>
+        </div>
+    `).join('');
 }
 
 function generateCardHTML(name, idx) {

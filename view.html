@@ -19,14 +19,14 @@
 
         <!-- Stats Dashboard -->
         <div id="stats-dashboard" class="dashboard hidden">
+            <!-- Row 1: Key Metrics -->
             <div class="stat-card">
                 <div class="stat-label">Total Personnel</div>
                 <div class="stat-value" id="stat-total">-</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">Salary Gap</div>
-                <div class="stat-value" id="stat-gap">-</div>
-                <div class="stat-sub" id="stat-gap-range">Max - Min</div>
+                <div class="stat-label">Median Salary</div>
+                <div class="stat-value" id="stat-median">-</div>
             </div>
             <div class="stat-card wide">
                 <div class="stat-label">Classification Split</div>
@@ -39,6 +39,44 @@
                         <span class="legend-item"><span class="dot classified"></span> Classified (<span id="count-classified">0</span>)</span>
                         <span class="legend-item"><span class="dot unclassified"></span> Unclassified (<span id="count-unclassified">0</span>)</span>
                     </div>
+                </div>
+            </div>
+
+            <!-- Row 2: Deep Dives -->
+            <div class="stat-card wide">
+                <div class="stat-label">Salary Percentiles</div>
+                <div class="percentile-chart">
+                    <div class="percentile-line"></div>
+                    <div class="tick p10" id="tick-p10" title="10th Percentile"><span class="tick-label">10%</span></div>
+                    <div class="tick p25" id="tick-p25" title="25th Percentile"><span class="tick-label">25%</span></div>
+                    <div class="tick p50" id="tick-p50" title="Median"><span class="tick-label">50%</span></div>
+                    <div class="tick p75" id="tick-p75" title="75th Percentile"><span class="tick-label">75%</span></div>
+                    <div class="tick p90" id="tick-p90" title="90th Percentile"><span class="tick-label">90%</span></div>
+                </div>
+                <div class="percentile-legend">
+                    <span id="val-p10">-</span>
+                    <span id="val-p50" style="font-weight:bold; color:var(--primary);">-</span>
+                    <span id="val-p90">-</span>
+                </div>
+            </div>
+
+            <div class="stat-card wide">
+                <div class="stat-label">Tenure (Years of Service)</div>
+                <div class="tenure-chart" id="tenure-chart">
+                    <!-- Injected via JS -->
+                </div>
+                <div class="bar-legend">
+                    <span class="legend-item"><span class="dot" style="background:#4ade80"></span> < 2y</span>
+                    <span class="legend-item"><span class="dot" style="background:#22c55e"></span> 2-5y</span>
+                    <span class="legend-item"><span class="dot" style="background:#16a34a"></span> 5-10y</span>
+                    <span class="legend-item"><span class="dot" style="background:#15803d"></span> 10y+</span>
+                </div>
+            </div>
+
+            <div class="stat-card wide full-width-mobile">
+                <div class="stat-label">Top Organizations</div>
+                <div id="org-leaderboard" class="leaderboard">
+                    <!-- Injected via JS -->
                 </div>
             </div>
         </div>
