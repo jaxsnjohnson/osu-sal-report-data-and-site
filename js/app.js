@@ -304,12 +304,17 @@ function updateDashboard(stats) {
     // Update Median Marker
     els.pMarker50.style.left = `${pos50}%`;
 
-    // Update Labels
-    els.vals.p10.textContent = formatMoney(p10);
-    els.vals.p25.textContent = formatMoney(p25);
-    els.vals.p50.textContent = formatMoney(p50);
-    els.vals.p75.textContent = formatMoney(p75);
-    els.vals.p90.textContent = formatMoney(p90);
+    // Update Labels (Absolute Positioning)
+    const setLabel = (el, val, pos) => {
+        el.textContent = formatMoney(val);
+        el.style.left = `${pos}%`;
+    };
+
+    setLabel(els.vals.p10, p10, pos10);
+    setLabel(els.vals.p25, p25, pos25);
+    setLabel(els.vals.p50, p50, pos50);
+    setLabel(els.vals.p75, p75, pos75);
+    setLabel(els.vals.p90, p90, pos90);
 
     // Tenure Chart
     const tTotal = stats.tenure.t0_2 + stats.tenure.t2_5 + stats.tenure.t5_10 + stats.tenure.t10_plus || 1;

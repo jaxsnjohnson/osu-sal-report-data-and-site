@@ -220,13 +220,13 @@ td { padding: 12px 0; border-bottom: 1px solid var(--border); vertical-align: to
 /* Percentile Chart - Range Bar Style */
 .percentile-chart-container {
     position: relative;
-    height: 40px;
+    height: 50px; /* Slight increase to accommodate labels inside */
     margin-top: 10px;
     width: 100%;
 }
 .p-range-outer {
     position: absolute;
-    top: 50%;
+    top: 40%; /* Moved up slightly */
     height: 4px;
     background: rgba(255, 255, 255, 0.2);
     border-radius: 2px;
@@ -235,7 +235,7 @@ td { padding: 12px 0; border-bottom: 1px solid var(--border); vertical-align: to
 }
 .p-box-inner {
     position: absolute;
-    top: 50%;
+    top: 40%;
     height: 12px;
     background: linear-gradient(90deg, var(--primary), #e65100);
     border-radius: 6px;
@@ -246,7 +246,7 @@ td { padding: 12px 0; border-bottom: 1px solid var(--border); vertical-align: to
 }
 .p-marker {
     position: absolute;
-    top: 50%;
+    top: 40%;
     height: 20px;
     width: 4px;
     background: #fff;
@@ -257,19 +257,26 @@ td { padding: 12px 0; border-bottom: 1px solid var(--border); vertical-align: to
     transition: left 0.5s ease;
 }
 
-.percentile-labels {
-    display: flex;
-    justify-content: space-between;
+/* Absolute Positioned Labels */
+.p-label-abs {
+    position: absolute;
+    top: 65%; /* Below the chart */
+    transform: translateX(-50%); /* Center on the mark */
     font-family: monospace;
-    font-size: 0.8rem;
+    font-size: 0.75rem;
     color: var(--text-muted);
-    margin-top: 5px;
+    white-space: nowrap;
+    transition: left 0.5s ease;
 }
-.p-label.main { color: var(--text-main); font-weight: bold; }
-.hidden-mobile { display: block; }
-@media(max-width: 600px) {
-    .hidden-mobile { display: none; }
+.p-label-abs.main {
+    color: var(--text-main);
+    font-weight: bold;
+    top: -5px; /* Above the chart */
+    font-size: 0.9rem;
 }
+
+/* Hide P25/P75 text to prevent overlap; box is sufficient */
+.hidden-mobile { display: none; }
 
 /* Tenure Chart */
 .tenure-chart {
