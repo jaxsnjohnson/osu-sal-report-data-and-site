@@ -41,6 +41,7 @@ const state = {
 // DOM Elements
 const els = {
     searchInput: document.getElementById('search'),
+    clearBtn: document.getElementById('clear-search'),
     typeSelect: document.getElementById('type-filter'),
     roleInput: document.getElementById('role-filter'),
     salaryMin: document.getElementById('salary-min'),
@@ -468,10 +469,25 @@ function debounce(func, wait) {
 }
 
 // Search Inputs
-els.searchInput.addEventListener('input', debounce((e) => {
-    state.filters.text = e.target.value;
+const handleSearch = debounce(() => {
+    state.filters.text = els.searchInput.value;
     runSearch();
-}, 300));
+}, 300);
+
+els.searchInput.addEventListener('input', (e) => {
+    const val = e.target.value;
+    if (val) els.clearBtn.classList.remove('hidden');
+    else els.clearBtn.classList.add('hidden');
+    handleSearch();
+});
+
+els.clearBtn.addEventListener('click', () => {
+    els.searchInput.value = '';
+    els.clearBtn.classList.add('hidden');
+    state.filters.text = '';
+    runSearch();
+    els.searchInput.focus();
+});
 
 els.typeSelect.addEventListener('change', (e) => {
     state.filters.type = e.target.value;
