@@ -60,17 +60,7 @@ const els = {
     orgLeaderboard: document.getElementById('org-leaderboard'),
     tenureChart: document.getElementById('tenure-chart'),
     roleDonut: document.getElementById('role-donut'),
-    roleLegend: document.getElementById('role-legend'),
-    pRange10_90: document.getElementById('p-range-10-90'),
-    pBox25_75: document.getElementById('p-box-25-75'),
-    pMarker50: document.getElementById('p-marker-50'),
-    vals: {
-        p10: document.getElementById('label-p10'),
-        p25: document.getElementById('label-p25'),
-        p50: document.getElementById('label-median'),
-        p75: document.getElementById('label-p75'),
-        p90: document.getElementById('label-p90'),
-    }
+    roleLegend: document.getElementById('role-legend')
 };
 
 // Initialization
@@ -162,8 +152,6 @@ function runSearch() {
 }
 
 function calculateStats(keys) {
-    let min = Infinity;
-    let max = -Infinity;
     let classified = 0;
     let unclassified = 0;
     let salaries = [];
@@ -181,8 +169,6 @@ function calculateStats(keys) {
 
         // Salary Stats
         if (salary > 0) {
-            if (salary < min) min = salary;
-            if (salary > max) max = salary;
             salaries.push(salary);
         }
 
@@ -212,25 +198,13 @@ function calculateStats(keys) {
         }
     });
 
-    if (min === Infinity) min = 0;
-    if (max === -Infinity) max = 0;
-
-    // Percentiles
+    // Median Salary
     salaries.sort((a, b) => a - b);
-    const getP = (p) => {
-        if (!salaries.length) return 0;
-        const idx = Math.floor((p / 100) * (salaries.length - 1));
-        return salaries[idx];
-    };
-
-    const percentiles = {
-        min, max,
-        p10: getP(10),
-        p25: getP(25),
-        p50: getP(50), // Median
-        p75: getP(75),
-        p90: getP(90)
-    };
+    let median = 0;
+    if (salaries.length > 0) {
+        const mid = Math.floor(salaries.length / 2);
+        median = salaries.length % 2 !== 0 ? salaries[mid] : (salaries[mid - 1] + salaries[mid]) / 2;
+    }
 
     // Top Orgs
     const sortedOrgs = Object.entries(orgs)
@@ -244,7 +218,7 @@ function calculateStats(keys) {
 
     return {
         count: keys.length,
-        percentiles,
+        medianSalary: median,
         classified,
         unclassified,
         topOrgs: sortedOrgs,
@@ -264,7 +238,7 @@ function personOrg(p) {
 function updateDashboard(stats) {
     els.dashboard.classList.remove('hidden');
     els.statTotal.textContent = stats.count.toLocaleString();
-    els.statMedian.textContent = formatMoney(stats.percentiles.p50);
+    els.statMedian.textContent = formatMoney(stats.medianSalary);
 
     // Classification
     const totalTypes = stats.classified + stats.unclassified;
@@ -272,49 +246,10 @@ function updateDashboard(stats) {
     const unclassPct = totalTypes ? (stats.unclassified / totalTypes) * 100 : 0;
     els.barClassified.style.width = `${classPct}%`;
     els.barUnclassified.style.width = `${unclassPct}%`;
+    els.barClassified.title = `Classified: ${stats.classified.toLocaleString()} (${Math.round(classPct)}%)`;
+    els.barUnclassified.title = `Unclassified: ${stats.unclassified.toLocaleString()} (${Math.round(unclassPct)}%)`;
     els.countClassified.textContent = stats.classified.toLocaleString();
     els.countUnclassified.textContent = stats.unclassified.toLocaleString();
-
-    // Percentiles (Logarithmic Scale)
-    const { min, max, p10, p25, p50, p75, p90 } = stats.percentiles;
-
-    const getLogPos = (val) => {
-        if (val <= 0 || min <= 0) return 0;
-        const logMin = Math.log(min || 1);
-        const logMax = Math.log(max || 100000); // Default max if 0
-        const logVal = Math.log(val);
-        const pos = ((logVal - logMin) / (logMax - logMin)) * 100;
-        return Math.max(0, Math.min(100, pos));
-    };
-
-    const pos10 = getLogPos(p10);
-    const pos25 = getLogPos(p25);
-    const pos50 = getLogPos(p50);
-    const pos75 = getLogPos(p75);
-    const pos90 = getLogPos(p90);
-
-    // Update Range Bar (10-90)
-    els.pRange10_90.style.left = `${pos10}%`;
-    els.pRange10_90.style.width = `${pos90 - pos10}%`;
-
-    // Update Box (25-75)
-    els.pBox25_75.style.left = `${pos25}%`;
-    els.pBox25_75.style.width = `${pos75 - pos25}%`;
-
-    // Update Median Marker
-    els.pMarker50.style.left = `${pos50}%`;
-
-    // Update Labels (Absolute Positioning)
-    const setLabel = (el, val, pos) => {
-        el.textContent = formatMoney(val);
-        el.style.left = `${pos}%`;
-    };
-
-    setLabel(els.vals.p10, p10, pos10);
-    setLabel(els.vals.p25, p25, pos25);
-    setLabel(els.vals.p50, p50, pos50);
-    setLabel(els.vals.p75, p75, pos75);
-    setLabel(els.vals.p90, p90, pos90);
 
     // Tenure Chart
     const tTotal = stats.tenure.t0_2 + stats.tenure.t2_5 + stats.tenure.t5_10 + stats.tenure.t10_plus || 1;
@@ -369,6 +304,7 @@ function updateDonut(roles, total) {
     }
 
     els.roleDonut.style.background = `conic-gradient(${gradientParts.join(', ')})`;
+    els.roleDonut.title = roles.map(([r, c]) => `${r}: ${c} (${Math.round(c/total*100)}%)`).join('\n');
 
     // Legend
     els.roleLegend.innerHTML = roles.map(([role, count], idx) => `
@@ -554,15 +490,36 @@ els.salaryMax.addEventListener('input', debounce((e) => {
 }, 300));
 
 // Modal Logic
-const modal = document.getElementById('info-modal');
-const infoBtn = document.getElementById('info-btn');
-const closeBtn = document.getElementById('close-modal');
+document.addEventListener('DOMContentLoaded', () => {
+    const modal = document.getElementById('info-modal');
+    const infoBtn = document.getElementById('info-btn');
+    const closeBtn = document.getElementById('close-modal');
 
-if (infoBtn && modal && closeBtn) {
-    infoBtn.onclick = () => modal.classList.remove('hidden');
-    closeBtn.onclick = () => modal.classList.add('hidden');
-    window.onclick = (e) => { if (e.target == modal) modal.classList.add('hidden'); }
-}
+    if (infoBtn && modal && closeBtn) {
+        infoBtn.addEventListener('click', () => {
+            modal.classList.remove('hidden');
+            closeBtn.focus();
+        });
+
+        closeBtn.addEventListener('click', () => {
+            modal.classList.add('hidden');
+            infoBtn.focus();
+        });
+
+        window.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.classList.add('hidden');
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+                modal.classList.add('hidden');
+                infoBtn.focus();
+            }
+        });
+    }
+});
 
 // Ctrl+F Trap
 document.addEventListener('keydown', (e) => {

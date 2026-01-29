@@ -14,7 +14,7 @@
     <div class="header">
         <div class="title-row">
             <h1>Personnel History</h1>
-            <button id="info-btn" class="icon-btn" aria-label="About this project">?</button>
+            <button type="button" id="info-btn" class="icon-btn" aria-label="About this project">?</button>
         </div>
 
         <!-- Stats Dashboard -->
@@ -43,25 +43,6 @@
             </div>
 
             <!-- Row 2: Deep Dives -->
-            <div class="stat-card wide">
-                <div class="stat-label">Salary Percentiles</div>
-                <div class="percentile-chart-container">
-                    <!-- Range Bar (10th to 90th) -->
-                    <div id="p-range-10-90" class="p-range-outer"></div>
-                    <!-- Box (25th to 75th) -->
-                    <div id="p-box-25-75" class="p-box-inner"></div>
-                    <!-- Median Marker -->
-                    <div id="p-marker-50" class="p-marker"></div>
-
-                    <!-- Labels (Absolutely Positioned) -->
-                    <div id="label-p10" class="p-label-abs"></div>
-                    <div id="label-p25" class="p-label-abs hidden-mobile"></div>
-                    <div id="label-median" class="p-label-abs main"></div>
-                    <div id="label-p75" class="p-label-abs hidden-mobile"></div>
-                    <div id="label-p90" class="p-label-abs"></div>
-                </div>
-            </div>
-
             <div class="stat-column wide">
                 <div class="stat-card">
                     <div class="stat-label">Years of Service</div>
@@ -92,6 +73,8 @@
                 </div>
             </div>
         </div>
+
+        <hr class="section-divider">
 
         <div class="search-container">
             <input type="text" id="search" class="search-bar" placeholder="Search name, org... (Ctrl+F)">
