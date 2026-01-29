@@ -59,6 +59,8 @@ const els = {
     // New Chart Elements
     orgLeaderboard: document.getElementById('org-leaderboard'),
     tenureChart: document.getElementById('tenure-chart'),
+    roleDonut: document.getElementById('role-donut'),
+    roleLegend: document.getElementById('role-legend'),
     ticks: {
         p10: document.getElementById('tick-p10'),
         p25: document.getElementById('tick-p25'),
@@ -168,6 +170,7 @@ function calculateStats(keys) {
     let unclassified = 0;
     let salaries = [];
     let orgs = {};
+    let roles = {};
     let tenure = { t0_2: 0, t2_5: 0, t5_10: 0, t10_plus: 0 };
 
     const now = new Date();
@@ -190,9 +193,12 @@ function calculateStats(keys) {
         if (src.includes('unclass')) unclassified++;
         else classified++;
 
-        // Organizations
+        // Organizations & Roles
         const org = personOrg(p) || 'Unknown';
         orgs[org] = (orgs[org] || 0) + 1;
+
+        const role = lastJob['Job Title'] || 'Unknown';
+        roles[role] = (roles[role] || 0) + 1;
 
         // Tenure
         const hiredStr = p.Meta['First Hired'];
@@ -233,12 +239,18 @@ function calculateStats(keys) {
         .sort((a, b) => b[1] - a[1])
         .slice(0, 5);
 
+    // Top Roles
+    const sortedRoles = Object.entries(roles)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4); // Top 4
+
     return {
         count: keys.length,
         percentiles,
         classified,
         unclassified,
         topOrgs: sortedOrgs,
+        topRoles: sortedRoles,
         tenure
     };
 }
@@ -265,18 +277,23 @@ function updateDashboard(stats) {
     els.countClassified.textContent = stats.classified.toLocaleString();
     els.countUnclassified.textContent = stats.unclassified.toLocaleString();
 
-    // Percentiles
+    // Percentiles (Logarithmic Scale)
     const { min, max, p10, p25, p50, p75, p90 } = stats.percentiles;
-    const range = max - min || 1; // Avoid divide by zero
 
-    // Position ticks (relative to min/max)
-    const getPos = (val) => ((val - min) / range) * 100;
+    const getLogPos = (val) => {
+        if (val <= 0 || min <= 0) return 0;
+        const logMin = Math.log(min || 1);
+        const logMax = Math.log(max || 100000); // Default max if 0
+        const logVal = Math.log(val);
+        const pos = ((logVal - logMin) / (logMax - logMin)) * 100;
+        return Math.max(0, Math.min(100, pos));
+    };
 
-    els.ticks.p10.style.left = `${getPos(p10)}%`;
-    els.ticks.p25.style.left = `${getPos(p25)}%`;
-    els.ticks.p50.style.left = `${getPos(p50)}%`;
-    els.ticks.p75.style.left = `${getPos(p75)}%`;
-    els.ticks.p90.style.left = `${getPos(p90)}%`;
+    els.ticks.p10.style.left = `${getLogPos(p10)}%`;
+    els.ticks.p25.style.left = `${getLogPos(p25)}%`;
+    els.ticks.p50.style.left = `${getLogPos(p50)}%`;
+    els.ticks.p75.style.left = `${getLogPos(p75)}%`;
+    els.ticks.p90.style.left = `${getLogPos(p90)}%`;
 
     els.vals.p10.textContent = formatMoney(p10);
     els.vals.p50.textContent = formatMoney(p50);
@@ -309,6 +326,37 @@ function updateDashboard(stats) {
             </div>
         </div>
     `).join('');
+
+    // Role Donut Chart
+    updateDonut(stats.topRoles, stats.count);
+}
+
+function updateDonut(roles, total) {
+    if (!roles.length) return;
+
+    const colors = ['#D73F09', '#b83508', '#992c06', '#7a2205', '#444444'];
+    let currentDeg = 0;
+    let gradientParts = [];
+    let otherCount = total;
+
+    roles.forEach(([role, count], idx) => {
+        const deg = (count / total) * 360;
+        gradientParts.push(`${colors[idx]} ${currentDeg}deg ${currentDeg + deg}deg`);
+        currentDeg += deg;
+        otherCount -= count;
+    });
+
+    // Add "Other" segment
+    if (otherCount > 0) {
+        gradientParts.push(`${colors[4]} ${currentDeg}deg 360deg`);
+    }
+
+    els.roleDonut.style.background = `conic-gradient(${gradientParts.join(', ')})`;
+
+    // Legend
+    els.roleLegend.innerHTML = roles.map(([role, count], idx) => `
+        <div class="legend-item"><span class="dot" style="background:${colors[idx]}"></span> ${role} (${Math.round(count/total*100)}%)</div>
+    `).join('') + (otherCount > 0 ? `<div class="legend-item"><span class="dot" style="background:${colors[4]}"></span> Other (${Math.round(otherCount/total*100)}%)</div>` : '');
 }
 
 function generateCardHTML(name, idx) {

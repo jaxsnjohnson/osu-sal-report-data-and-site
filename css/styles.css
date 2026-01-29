@@ -280,6 +280,29 @@ td { padding: 12px 0; border-bottom: 1px solid var(--border); vertical-align: to
 .lb-bar { height: 8px; background: var(--primary); border-radius: 4px; transition: width 0.5s ease; min-width: 2px; }
 .lb-val { font-family: monospace; font-weight: bold; color: var(--text-main); }
 
+/* Donut Chart */
+.donut-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+}
+.donut-chart {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    background: #444; /* Fallback */
+    /* Mask for donut hole */
+    -webkit-mask: radial-gradient(transparent 55%, black 56%);
+    mask: radial-gradient(transparent 55%, black 56%);
+}
+.donut-legend {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
 
 /* Filter Inputs */
 .salary-inputs {
