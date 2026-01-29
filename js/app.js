@@ -16,8 +16,15 @@ const cleanMoney = (val) => {
 // Utility: Format date nicely
 const formatDate = (dateStr) => {
     if (!dateStr || dateStr === "Unknown Date") return dateStr;
-    const [y, m, d] = dateStr.split('-');
-    if(y && m && d) return `${m}/${d}/${y}`;
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+        // Handle YYYY-MM-DD
+        if (parts[0].length === 4) {
+            return `${parts[1]}/${parts[2]}/${parts[0]}`;
+        }
+        // Handle DD-MON-YYYY (return as is, e.g., 01-AUG-2022)
+        return dateStr;
+    }
     return dateStr;
 };
 
@@ -330,6 +337,9 @@ function generateCardHTML(name, idx) {
             <div class="person-info">
                 <h2>${name}</h2>
                 <p>Home Org: ${person.Meta["Home Orgn"] || 'N/A'}</p>
+                <p class="meta-dates" style="font-size: 0.85rem; color: #64748b; margin-top: 4px;">
+                    Hired: ${formatDate(person.Meta["First Hired"])} &bull; Adj Service: ${formatDate(person.Meta["Adj Service Date"])}
+                </p>
             </div>
             <div class="latest-stat">
                 <div class="latest-salary">
@@ -360,6 +370,16 @@ function generateCardHTML(name, idx) {
                                 <td>
                                     <div style="font-weight:600;">${job['Job Title'] || ''}</div>
                                     <div style="font-size:0.85rem; color:#64748b;">${job['Job Orgn'] || ''}</div>
+                                    <div class="job-meta-grid" style="font-size: 0.8rem; color: #475569; margin-top: 4px; line-height: 1.4;">
+                                        ${job['Rank'] && job['Rank'] !== 'No Rank' ? `<div>Rank: ${job['Rank']} (Eff: ${formatDate(job['Rank Effective Date'])})</div>` : ''}
+                                        <div>
+                                            Pos: ${job['Posn-Suff'] || 'N/A'}
+                                            ${job['Appt Percent'] ? `| Appt: ${job['Appt Percent']}%` : ''}
+                                        </div>
+                                        <div>
+                                            Dates: ${formatDate(job['Appt Begin Date'])} - ${job['Appt End Date'] ? formatDate(job['Appt End Date']) : 'Present'}
+                                        </div>
+                                    </div>
                                 </td>
                                 <td>
                                     <span class="badge badge-type">${job['Job Type'] || '?'}</span>
