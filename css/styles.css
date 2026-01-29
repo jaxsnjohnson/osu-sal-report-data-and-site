@@ -353,5 +353,29 @@ input[type=number] { -moz-appearance: textfield; }
 .modal-content ul { padding-left: 20px; color: var(--text-muted); }
 .modal-content li { margin-bottom: 8px; }
 
+.modal-section {
+    margin-bottom: 1.5rem;
+}
+
+.warning-box {
+    background-color: #fff3cd;
+    border-left: 5px solid #ffc107;
+    padding: 1rem;
+    border-radius: 4px;
+    color: #856404;
+}
+
+.warning-box h3 {
+    margin-top: 0;
+    color: #856404;
+}
+
+.subtitle {
+    font-style: italic;
+    color: #666;
+    margin-top: -10px;
+    margin-bottom: 20px;
+}
+
 @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
