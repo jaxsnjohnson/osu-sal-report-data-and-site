@@ -42,7 +42,7 @@ def parse_single_file(filepath):
         "Appt Begin Date", "Appt End Date", "First Hired", 
         "Adj Service Date", "Job Type", "Posn-Suff", 
         "Rank Effective Date", "Appt Percent", "Annual Salary Rate",
-        "Full-Time Monthly Salary", "Appt"
+        "Full-Time Monthly Salary", "Appt", "Hourly Rate"
     ]
     # Sort keys by length desc to capture 'Appt End Date' before 'Appt'
     keys.sort(key=len, reverse=True)
@@ -98,11 +98,15 @@ def parse_single_file(filepath):
                      match = re.search(r'[\d,]+\.?\d*', value)
                      if match: value = match.group(0).replace(',', '')
 
+                elif key == "Hourly Rate":
+                     match = re.search(r'[\d,]+\.?\d*', value)
+                     if match: value = match.group(0).replace(',', '')
+
                 job_keys = [
                     "Job Orgn", "Job Title", "Appt Begin Date", "Appt End Date",
                     "Job Type", "Posn-Suff", "Rank", "Rank Effective Date",
                     "Appt Percent", "Annual Salary Rate", 
-                    "Full-Time Monthly Salary", "Appt"
+                    "Full-Time Monthly Salary", "Appt", "Hourly Rate"
                 ]
 
                 if key in job_keys:
@@ -114,12 +118,19 @@ def parse_single_file(filepath):
 
         # Normalization
         for job in jobs:
-            if "Annual Salary Rate" not in job and "Full-Time Monthly Salary" in job:
-                try:
-                    monthly = float(job["Full-Time Monthly Salary"])
-                    annual = monthly * 12
-                    job["Annual Salary Rate"] = "{:.2f}".format(annual)
-                except: pass
+            if "Annual Salary Rate" not in job:
+                if "Hourly Rate" in job:
+                    try:
+                        hourly = float(job["Hourly Rate"])
+                        annual = hourly * 2080
+                        job["Annual Salary Rate"] = "{:.2f}".format(annual)
+                    except: pass
+                elif "Full-Time Monthly Salary" in job:
+                    try:
+                        monthly = float(job["Full-Time Monthly Salary"])
+                        annual = monthly * 12
+                        job["Annual Salary Rate"] = "{:.2f}".format(annual)
+                    except: pass
 
         if person_name:
             if person_name not in database:
