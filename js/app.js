@@ -61,17 +61,15 @@ const els = {
     tenureChart: document.getElementById('tenure-chart'),
     roleDonut: document.getElementById('role-donut'),
     roleLegend: document.getElementById('role-legend'),
-    ticks: {
-        p10: document.getElementById('tick-p10'),
-        p25: document.getElementById('tick-p25'),
-        p50: document.getElementById('tick-p50'),
-        p75: document.getElementById('tick-p75'),
-        p90: document.getElementById('tick-p90'),
-    },
+    pRange10_90: document.getElementById('p-range-10-90'),
+    pBox25_75: document.getElementById('p-box-25-75'),
+    pMarker50: document.getElementById('p-marker-50'),
     vals: {
-        p10: document.getElementById('val-p10'),
-        p50: document.getElementById('val-p50'),
-        p90: document.getElementById('val-p90'),
+        p10: document.getElementById('label-p10'),
+        p25: document.getElementById('label-p25'),
+        p50: document.getElementById('label-median'),
+        p75: document.getElementById('label-p75'),
+        p90: document.getElementById('label-p90'),
     }
 };
 
@@ -289,14 +287,28 @@ function updateDashboard(stats) {
         return Math.max(0, Math.min(100, pos));
     };
 
-    els.ticks.p10.style.left = `${getLogPos(p10)}%`;
-    els.ticks.p25.style.left = `${getLogPos(p25)}%`;
-    els.ticks.p50.style.left = `${getLogPos(p50)}%`;
-    els.ticks.p75.style.left = `${getLogPos(p75)}%`;
-    els.ticks.p90.style.left = `${getLogPos(p90)}%`;
+    const pos10 = getLogPos(p10);
+    const pos25 = getLogPos(p25);
+    const pos50 = getLogPos(p50);
+    const pos75 = getLogPos(p75);
+    const pos90 = getLogPos(p90);
 
+    // Update Range Bar (10-90)
+    els.pRange10_90.style.left = `${pos10}%`;
+    els.pRange10_90.style.width = `${pos90 - pos10}%`;
+
+    // Update Box (25-75)
+    els.pBox25_75.style.left = `${pos25}%`;
+    els.pBox25_75.style.width = `${pos75 - pos25}%`;
+
+    // Update Median Marker
+    els.pMarker50.style.left = `${pos50}%`;
+
+    // Update Labels
     els.vals.p10.textContent = formatMoney(p10);
+    els.vals.p25.textContent = formatMoney(p25);
     els.vals.p50.textContent = formatMoney(p50);
+    els.vals.p75.textContent = formatMoney(p75);
     els.vals.p90.textContent = formatMoney(p90);
 
     // Tenure Chart
