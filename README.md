@@ -5,6 +5,7 @@
 ![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)
 ![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)
 ![Data Source](https://img.shields.io/badge/Source-Public%20Records-orange)
+[![Ko-fi](https://img.shields.io/badge/Support%20me-on%20Ko--fi-72a4f2?style=flat&logo=ko-fi&logoColor=white)](https://ko-fi.com/X8X7K6PDV)
 
 ## ⚠️ Important Disclaimer
 
