@@ -13,6 +13,39 @@ const cleanMoney = (val) => {
     return parseFloat(val.toString().replace(/,/g, '')) || 0;
 };
 
+// Utility: Calculate total pay for the latest snapshot
+const getPersonTotalPay = (person) => {
+    if (!person || !person.Timeline || person.Timeline.length === 0) return 0;
+
+    const lastSnapshot = person.Timeline[person.Timeline.length - 1];
+    if (!lastSnapshot.Jobs) return 0;
+
+    let total = 0;
+    lastSnapshot.Jobs.forEach(job => {
+        const rate = cleanMoney(job['Annual Salary Rate']);
+        // Parse Appt Percent, default to 100 if missing or invalid, then divide by 100
+        // Wait, normally salary rate is FTE. Actual pay = Rate * (Percent/100).
+        // If data says "100" it means 100%.
+        let pct = parseFloat(job['Appt Percent']);
+        if (isNaN(pct)) pct = 0; // If missing, assume 0? Or 100? Safest is 0 if strictly calculating 'actual' pay from known data.
+
+        // However, some records might lack 'Appt Percent'.
+        // If 'Appt Percent' is missing, should we assume 100?
+        // Let's look at the data provided by user earlier. It had "Appt Percent": "100".
+        // If it is 0, they get 0 pay? That seems correct for "Leave without pay" etc.
+
+        if (rate > 0) {
+             // If the user wants the SUM of the rates (assuming they are additive)
+             // But usually Rate is FTE.
+             // Case: President (100%) + Professor (100%).
+             // Total Pay = Rate1 * 1.0 + Rate2 * 1.0.
+
+             total += rate * (pct / 100);
+        }
+    });
+    return total;
+};
+
 // Utility: Format date nicely
 const formatDate = (dateStr) => {
     if (!dateStr || dateStr === "Unknown Date") return dateStr;
@@ -143,9 +176,7 @@ function runSearch() {
 
         // 4. Salary Range Match (Based on LATEST snapshot)
         if (minSalary !== null || maxSalary !== null) {
-            const lastSnapshot = person.Timeline[person.Timeline.length - 1];
-            const lastJob = lastSnapshot.Jobs[0] || {};
-            const salary = cleanMoney(lastJob['Annual Salary Rate']);
+            const salary = getPersonTotalPay(person);
 
             if (minSalary !== null && salary < minSalary) return false;
             if (maxSalary !== null && salary > maxSalary) return false;
@@ -177,7 +208,7 @@ function calculateStats(keys) {
         const p = state.masterData[key];
         const lastSnap = p.Timeline[p.Timeline.length - 1];
         const lastJob = lastSnap.Jobs[0] || {};
-        const salary = cleanMoney(lastJob['Annual Salary Rate']);
+        const salary = getPersonTotalPay(p);
 
         // Salary Stats
         if (salary > 0) {
@@ -331,6 +362,8 @@ function generateCardHTML(name, idx) {
     // Use simple index-based ID to avoid issues with special characters in names (e.g. O'Connor)
     const cardId = `card-${idx}`;
 
+    const totalPay = getPersonTotalPay(person);
+
     return `
     <div class="card" id="${cardId}">
         <div class="card-header" onclick="toggleCard('${cardId}')">
@@ -339,8 +372,8 @@ function generateCardHTML(name, idx) {
                 <p>Home Org: ${person.Meta["Home Orgn"] || 'N/A'}</p>
             </div>
             <div class="latest-stat">
-                <div class="latest-salary">
-                    ${formatMoney(lastJob['Annual Salary Rate'])}
+                <div class="latest-salary" title="Total calculated from all active appointments">
+                    ${formatMoney(totalPay)}
                 </div>
                 <div class="latest-role">${lastJob['Job Title'] || 'Unknown'}</div>
             </div>
