@@ -77,20 +77,23 @@
         <hr class="section-divider">
 
         <div class="search-container">
-            <input type="text" id="search" class="search-bar" placeholder="Search name, org... (Ctrl+F)">
-
-            <div class="salary-inputs">
-                <input type="number" id="salary-min" class="filter-input" placeholder="Min Salary">
-                <input type="number" id="salary-max" class="filter-input" placeholder="Max Salary">
+            <div class="search-wrapper">
+                <input type="text" id="search" class="search-bar" placeholder="Search name, org... (Ctrl+F)" aria-label="Search personnel">
+                <button id="clear-search" class="clear-btn hidden" aria-label="Clear search" tabindex="-1">&times;</button>
             </div>
 
-            <select id="type-filter" class="filter-select">
+            <div class="salary-inputs">
+                <input type="number" id="salary-min" class="filter-input" placeholder="Min Salary" aria-label="Minimum salary">
+                <input type="number" id="salary-max" class="filter-input" placeholder="Max Salary" aria-label="Maximum salary">
+            </div>
+
+            <select id="type-filter" class="filter-select" aria-label="Filter by classification type">
                 <option value="all">All Types</option>
                 <option value="classified">Classified</option>
                 <option value="unclassified">Unclassified</option>
             </select>
 
-            <input type="text" id="role-filter" class="filter-input" list="role-list" placeholder="Filter by Role...">
+            <input type="text" id="role-filter" class="filter-input" list="role-list" placeholder="Filter by Role..." aria-label="Filter by job role">
             <datalist id="role-list"></datalist>
         </div>
         <div class="stats" id="stats-bar">Loading data...</div>
