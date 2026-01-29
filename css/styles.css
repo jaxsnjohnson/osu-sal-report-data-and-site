@@ -423,6 +423,14 @@ input[type=number] { -moz-appearance: textfield; }
     text-decoration: none;
 }
 
+.kofi-btn {
+    background-color: #72a4f2;
+    margin-left: 10px;
+}
+.kofi-btn:hover {
+    background-color: #558dc6;
+}
+
 @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
