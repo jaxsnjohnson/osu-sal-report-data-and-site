@@ -67,6 +67,11 @@ const els = {
 fetch('data.json')
     .then(res => res.json())
     .then(data => {
+        // Pre-compute search strings for performance
+        Object.keys(data).forEach(key => {
+            data[key]._searchStr = (key + " " + JSON.stringify(data[key].Meta)).toLowerCase();
+        });
+
         state.masterData = data;
         state.masterKeys = Object.keys(data).sort();
 
@@ -105,9 +110,8 @@ function runSearch() {
         const person = state.masterData[name];
 
         // 1. Text Match (Name, Org)
-        const metaStr = JSON.stringify(person.Meta).toLowerCase();
-        const textMatch = name.toLowerCase().includes(term) || metaStr.includes(term);
-        if (!textMatch) return false;
+        // Optimization: Use pre-computed search string to avoid repeated JSON.stringify
+        if (!person._searchStr.includes(term)) return false;
 
         // 2. Type Match (Classified / Unclassified)
         if (typeFilter !== 'all') {
