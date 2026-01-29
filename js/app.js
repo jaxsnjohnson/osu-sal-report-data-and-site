@@ -337,9 +337,6 @@ function generateCardHTML(name, idx) {
             <div class="person-info">
                 <h2>${name}</h2>
                 <p>Home Org: ${person.Meta["Home Orgn"] || 'N/A'}</p>
-                <p class="meta-dates" style="font-size: 0.85rem; color: #64748b; margin-top: 4px;">
-                    Hired: ${formatDate(person.Meta["First Hired"])} &bull; Adj Service: ${formatDate(person.Meta["Adj Service Date"])}
-                </p>
             </div>
             <div class="latest-stat">
                 <div class="latest-salary">
@@ -350,6 +347,10 @@ function generateCardHTML(name, idx) {
         </div>
 
         <div class="history">
+            <div class="history-meta" style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #444; font-size: 0.9rem; color: #a0a0a0;">
+                <strong>Hired:</strong> ${formatDate(person.Meta["First Hired"])} &nbsp;&bull;&nbsp;
+                <strong>Adj Service:</strong> ${formatDate(person.Meta["Adj Service Date"])}
+            </div>
             <table>
                 <thead>
                     <tr>
