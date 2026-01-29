@@ -13,6 +13,19 @@ const cleanMoney = (val) => {
     return parseFloat(val.toString().replace(/,/g, '')) || 0;
 };
 
+// Utility: Calculate Total Actual Pay for a snapshot (Sum of all jobs adjusted by FTE)
+const calculateTotalPay = (snapshot) => {
+    if (!snapshot || !snapshot.Jobs) return 0;
+    return snapshot.Jobs.reduce((sum, job) => {
+        const rate = cleanMoney(job['Annual Salary Rate']);
+        // Default to 100% if missing, as standard assumption for full-time unless specified
+        const percentStr = job['Appt Percent'];
+        const percent = percentStr ? parseFloat(percentStr) : 100;
+        const effectivePercent = isNaN(percent) ? 100 : percent;
+        return sum + (rate * (effectivePercent / 100));
+    }, 0);
+};
+
 // Utility: Format date nicely
 const formatDate = (dateStr) => {
     if (!dateStr || dateStr === "Unknown Date") return dateStr;
@@ -129,14 +142,13 @@ function runSearch() {
             if (!hasRole) return false;
         }
 
-        // 4. Salary Range Match (Based on LATEST snapshot)
+        // 4. Salary Range Match (Based on LATEST snapshot TOTAL ACTUAL PAY)
         if (minSalary !== null || maxSalary !== null) {
             const lastSnapshot = person.Timeline[person.Timeline.length - 1];
-            const lastJob = lastSnapshot.Jobs[0] || {};
-            const salary = cleanMoney(lastJob['Annual Salary Rate']);
+            const totalPay = calculateTotalPay(lastSnapshot);
 
-            if (minSalary !== null && salary < minSalary) return false;
-            if (maxSalary !== null && salary > maxSalary) return false;
+            if (minSalary !== null && totalPay < minSalary) return false;
+            if (maxSalary !== null && totalPay > maxSalary) return false;
         }
 
         return true;
@@ -165,7 +177,9 @@ function calculateStats(keys) {
         const p = state.masterData[key];
         const lastSnap = p.Timeline[p.Timeline.length - 1];
         const lastJob = lastSnap.Jobs[0] || {};
-        const salary = cleanMoney(lastJob['Annual Salary Rate']);
+
+        // Use Total Actual Pay for median stats
+        const salary = calculateTotalPay(lastSnap);
 
         // Salary Stats
         if (salary > 0) {
@@ -316,6 +330,9 @@ function generateCardHTML(name, idx) {
     const person = state.masterData[name];
     const lastSnapshot = person.Timeline[person.Timeline.length - 1];
     const lastJob = lastSnapshot.Jobs[0] || {};
+    // Calculate total actual pay for the header
+    const totalPay = calculateTotalPay(lastSnapshot);
+
     // Use simple index-based ID to avoid issues with special characters in names (e.g. O'Connor)
     const cardId = `card-${idx}`;
 
@@ -328,7 +345,7 @@ function generateCardHTML(name, idx) {
             </div>
             <div class="latest-stat">
                 <div class="latest-salary">
-                    ${formatMoney(lastJob['Annual Salary Rate'])}
+                    ${formatMoney(totalPay)}
                 </div>
                 <div class="latest-role">${lastJob['Job Title'] || 'Unknown'}</div>
             </div>
@@ -360,8 +377,11 @@ function generateCardHTML(name, idx) {
                                     <span class="badge badge-type">${job['Job Type'] || '?'}</span>
                                 </td>
                                 <td class="money-cell">
-                                    ${formatMoney(job['Annual Salary Rate'])}
-                                    ${job['Salary Term'] ? `<span class="term-badge">${job['Salary Term']}</span>` : ''}
+                                    <div>${formatMoney(job['Annual Salary Rate'])}</div>
+                                    <div style="font-size:0.8em; color:#666;">
+                                        ${job['Appt Percent'] ? `${job['Appt Percent']}% FTE` : ''}
+                                        ${job['Salary Term'] ? ` • ${job['Salary Term']}` : ''}
+                                    </div>
                                 </td>
                             </tr>
                         `).join('')
