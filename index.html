@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Interactive explorer for personnel history data, including salary analysis, classification stats, and timeline tracking.">
-    <meta name="keywords" content="personnel, salary, history, explorer, data visualization">
-    <title>Personnel History Explorer</title>
+    <meta name="description" content="OSU Salary Transparency: Interactive explorer for Oregon State University personnel salary data, classification stats, and history.">
+    <meta name="keywords" content="OSU, Oregon State University, salary, transparency, personnel, history, data visualization">
+    <title>OSU Salary Transparency</title>
     <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -13,7 +13,7 @@
 <div class="container">
     <div class="header">
         <div class="title-row">
-            <h1>Personnel History</h1>
+            <h1>OSU Salary Transparency</h1>
             <button type="button" id="info-btn" class="icon-btn" aria-label="About this project">?</button>
         </div>
 
@@ -108,16 +108,55 @@
 <div id="info-modal" class="modal hidden">
     <div class="modal-content">
         <button id="close-modal" class="close" aria-label="Close modal">&times;</button>
-        <h2>About Personnel Explorer</h2>
-        <p>This tool allows you to explore personnel history data with ease.</p>
-        <h3>Features</h3>
-        <ul>
-            <li><strong>Interactive Search:</strong> Filter by name, organization, role, and salary.</li>
-            <li><strong>Dynamic Stats:</strong> See real-time analysis of the filtered dataset.</li>
-            <li><strong>Deep History:</strong> Expand cards to view detailed job timelines.</li>
-            <li><strong>Accessibility:</strong> Designed with high contrast and keyboard navigation in mind.</li>
-        </ul>
-        <p class="modal-footer">Designed by Palette 🎨</p>
+
+        <h2>About OSU Salary Transparency</h2>
+        <p class="subtitle">Democratizing access to public records.</p>
+
+        <div class="modal-section">
+            <h3>Why this exists</h3>
+            <p>
+                Public records should be truly public—not just available, but <strong>accessible</strong>.
+                This project is a civic hacking experiment designed to liberate data from static PDFs
+                and make it searchable, analyzable, and transparent for the entire community.
+            </p>
+        </div>
+
+        <div class="modal-section warning-box">
+            <h3>⚠️ Data Disclaimer</h3>
+            <p>
+                This data is parsed automatically from <a href="https://hr.oregonstate.edu/employees/administrators-supervisors/classification-compensation/salary-reports" target="_blank">official OSU PDF reports</a>.
+                While we strive for 100% accuracy, the OCR conversion process can occasionally result in errors.
+            </p>
+            <p>
+                <strong>Note:</strong> This dataset generally does not include bonuses, per diem, or student employees.
+                Name changes may not be tracked across different reports. Always refer to official documentation for official purposes.
+            </p>
+        </div>
+
+        <div class="modal-section">
+            <h3>Definitions</h3>
+            <ul>
+                <li>
+                    <strong>Classified:</strong> Roles represented by
+                    <a href="https://seiu503.org" target="_blank">SEIU 503</a>
+                    (<a href="https://www.local083.org" target="_blank">Sublocal 083</a>).
+                </li>
+                <li>
+                    <strong>Unclassified:</strong> Faculty, professional faculty, and administrators not represented by the union.
+                </li>
+            </ul>
+        </div>
+
+        <div class="modal-section">
+            <h3>Contribute</h3>
+            <p>
+                Found a bug? Want to help improve the tool? This project is open source.
+                <br>
+                <a href="https://github.com/jaxsnjohnson/osu-sal-report-data-and-site" target="_blank" class="link-btn">View on GitHub</a>
+            </p>
+        </div>
+
+        <p class="modal-footer">A project by Jax SN Johnson</p>
     </div>
 </div>
 

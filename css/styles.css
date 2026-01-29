@@ -353,5 +353,63 @@ input[type=number] { -moz-appearance: textfield; }
 .modal-content ul { padding-left: 20px; color: var(--text-muted); }
 .modal-content li { margin-bottom: 8px; }
 
+.modal-section {
+    margin-bottom: 1.5rem;
+}
+
+.warning-box {
+    background-color: #fff3cd;
+    border-left: 5px solid #ffc107;
+    padding: 1rem;
+    border-radius: 4px;
+    color: #856404;
+}
+
+.warning-box h3 {
+    margin-top: 0;
+    color: #856404;
+}
+
+.subtitle {
+    font-style: italic;
+    color: #666;
+    margin-top: -10px;
+    margin-bottom: 20px;
+}
+
+/* Modal Links */
+.modal-content a {
+    color: #60a5fa; /* Light blue for dark background */
+    text-decoration: none;
+}
+.modal-content a:hover {
+    text-decoration: underline;
+}
+
+/* Warning box links need to be dark */
+.warning-box a {
+    color: #533f03;
+    font-weight: bold;
+    text-decoration: underline;
+}
+
+/* Link Button (View on GitHub) */
+.link-btn {
+    display: inline-block;
+    margin-top: 10px;
+    padding: 10px 20px;
+    background-color: var(--primary);
+    color: #fff !important;
+    border-radius: 8px;
+    font-weight: bold;
+    text-decoration: none !important;
+    transition: background-color 0.2s, transform 0.1s;
+}
+.link-btn:hover {
+    background-color: #b83508;
+    transform: translateY(-1px);
+    text-decoration: none;
+}
+
 @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
