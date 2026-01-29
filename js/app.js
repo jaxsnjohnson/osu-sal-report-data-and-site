@@ -362,6 +362,8 @@ function generateCardHTML(name, idx) {
 
     const totalPay = getPersonTotalPay(person);
 
+    const reversedTimeline = person.Timeline.slice().reverse();
+
     return `
     <div class="card" id="${cardId}" data-name="${attrName}">
         <div class="card-header" onclick="toggleCard('${cardId}')">
@@ -397,8 +399,29 @@ function generateCardHTML(name, idx) {
                     </tr>
                 </thead>
                 <tbody>
-                    ${person.Timeline.slice().reverse().map(snap => {
-                        return snap.Jobs.map(job => `
+                    ${reversedTimeline.map((snap, snapIdx) => {
+                        // Find previous snapshot (which is next in reversed array)
+                        const prevSnap = reversedTimeline[snapIdx + 1];
+
+                        return snap.Jobs.map(job => {
+                            let diffHTML = '';
+                            if (prevSnap) {
+                                const prevJob = prevSnap.Jobs.find(j => j['Posn-Suff'] === job['Posn-Suff']);
+                                if (prevJob) {
+                                    const currRate = cleanMoney(job['Annual Salary Rate']);
+                                    const prevRate = cleanMoney(prevJob['Annual Salary Rate']);
+                                    const diff = currRate - prevRate;
+
+                                    if (diff !== 0 && prevRate > 0) {
+                                        const pct = (diff / prevRate) * 100;
+                                        const sign = diff > 0 ? '+' : '';
+                                        const colorClass = diff > 0 ? 'diff-positive' : 'diff-negative';
+                                        diffHTML = `<span class="diff-val ${colorClass}">${sign}${formatMoney(diff)} (${sign}${pct.toFixed(1)}%)</span>`;
+                                    }
+                                }
+                            }
+
+                            return `
                             <tr>
                                 <td class="date-cell">
                                     <div>${formatDate(snap.Date)}</div>
@@ -424,9 +447,10 @@ function generateCardHTML(name, idx) {
                                 <td class="money-cell">
                                     ${formatMoney(job['Annual Salary Rate'])}
                                     ${job['Salary Term'] ? `<span class="term-badge">${job['Salary Term']}</span>` : ''}
+                                    ${diffHTML}
                                 </td>
                             </tr>
-                        `).join('')
+                        `}).join('')
                     }).join('')}
                 </tbody>
             </table>

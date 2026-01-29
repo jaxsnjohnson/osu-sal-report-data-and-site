@@ -7,6 +7,8 @@
     --border: #444444;
     --success: #2eaea2; /* A brighter teal for visibility on dark */
     --purple: #a855f7; /* For Classified */
+    --diff-pos: #4ade80;
+    --diff-neg: #f87171;
 }
 
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: var(--bg-body); color: var(--text-main); margin: 0; padding: 20px; }
@@ -162,6 +164,16 @@ td { padding: 12px 0; border-bottom: 1px solid var(--border); vertical-align: to
 
 .date-cell { width: 140px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .money-cell { font-family: monospace; font-weight: 600; color: var(--text-main); }
+
+/* Diff Styles */
+.diff-val {
+    display: block;
+    font-size: 0.75rem;
+    margin-top: 2px;
+    font-weight: normal;
+}
+.diff-positive { color: var(--diff-pos); }
+.diff-negative { color: var(--diff-neg); }
 
 /* Utility */
 .hidden { display: none; }
