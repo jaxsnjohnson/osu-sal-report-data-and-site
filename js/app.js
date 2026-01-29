@@ -24,22 +24,10 @@ const getPersonTotalPay = (person) => {
     lastSnapshot.Jobs.forEach(job => {
         const rate = cleanMoney(job['Annual Salary Rate']);
         // Parse Appt Percent, default to 100 if missing or invalid, then divide by 100
-        // Wait, normally salary rate is FTE. Actual pay = Rate * (Percent/100).
-        // If data says "100" it means 100%.
         let pct = parseFloat(job['Appt Percent']);
-        if (isNaN(pct)) pct = 0; // If missing, assume 0? Or 100? Safest is 0 if strictly calculating 'actual' pay from known data.
-
-        // However, some records might lack 'Appt Percent'.
-        // If 'Appt Percent' is missing, should we assume 100?
-        // Let's look at the data provided by user earlier. It had "Appt Percent": "100".
-        // If it is 0, they get 0 pay? That seems correct for "Leave without pay" etc.
+        if (isNaN(pct)) pct = 0;
 
         if (rate > 0) {
-             // If the user wants the SUM of the rates (assuming they are additive)
-             // But usually Rate is FTE.
-             // Case: President (100%) + Professor (100%).
-             // Total Pay = Rate1 * 1.0 + Rate2 * 1.0.
-
              total += rate * (pct / 100);
         }
     });
@@ -117,9 +105,17 @@ fetch('data.json')
         state.masterKeys = Object.keys(data).sort();
 
         populateRoleOptions(data);
+
+        // Check for deep link before first render
+        const targetName = parseUrlParams();
+
         runSearch(); // Initial render
         updateStats();
         setupInfiniteScroll();
+
+        if (targetName) {
+            autoExpandTarget(targetName);
+        }
     })
     .catch(err => {
         els.stats.innerHTML = "Error loading data.json.";
@@ -361,14 +357,21 @@ function generateCardHTML(name, idx) {
     const lastJob = lastSnapshot.Jobs[0] || {};
     // Use simple index-based ID to avoid issues with special characters in names (e.g. O'Connor)
     const cardId = `card-${idx}`;
+    const safeName = name.replace(/'/g, "\\'"); // For JS string
+    const attrName = name.replace(/"/g, '&quot;'); // For HTML attribute
 
     const totalPay = getPersonTotalPay(person);
 
     return `
-    <div class="card" id="${cardId}">
+    <div class="card" id="${cardId}" data-name="${attrName}">
         <div class="card-header" onclick="toggleCard('${cardId}')">
             <div class="person-info">
-                <h2>${name}</h2>
+                <div class="name-header">
+                    <h2>${name}</h2>
+                    <button class="link-btn-card" data-linkname="${attrName}" onclick="copyLink(event, this.dataset.linkname)" aria-label="Copy link to ${attrName}" title="Copy Link">
+                        🔗
+                    </button>
+                </div>
                 <p>Home Org: ${person.Meta["Home Orgn"] || 'N/A'}</p>
             </div>
             <div class="latest-stat">
@@ -602,3 +605,63 @@ document.addEventListener('keydown', (e) => {
         els.searchInput.focus();
     }
 });
+
+// Deep Linking & Sharing
+function parseUrlParams() {
+    const params = new URLSearchParams(window.location.search);
+    const name = params.get('name');
+    if (name) {
+        state.filters.text = name;
+        els.searchInput.value = name;
+        els.clearBtn.classList.remove('hidden');
+        return name;
+    }
+    return null;
+}
+
+function autoExpandTarget(name) {
+    // Find the card with data-name matching the target
+    // Note: escape double quotes for the selector
+    const selector = `.card[data-name="${name.replace(/"/g, '\\"')}"]`;
+    const card = document.querySelector(selector);
+    if (card) {
+        card.classList.add('expanded');
+        setTimeout(() => {
+            card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
+    }
+}
+
+function copyLink(e, name) {
+    e.stopPropagation(); // Prevent card expansion
+
+    const url = new URL(window.location.href);
+    url.searchParams.set('name', name);
+
+    // Update browser history without reload
+    window.history.pushState({ path: url.href }, '', url.href);
+
+    navigator.clipboard.writeText(url.href).then(() => {
+        showToast(`Link copied for ${name}`);
+    }).catch(err => {
+        console.error('Failed to copy link', err);
+        showToast('Failed to copy link');
+    });
+}
+
+function showToast(msg) {
+    let toast = document.getElementById('toast-notification');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'toast-notification';
+        toast.className = 'toast';
+        document.body.appendChild(toast);
+    }
+
+    toast.textContent = msg;
+    toast.classList.add('show');
+
+    setTimeout(() => {
+        toast.classList.remove('show');
+    }, 3000);
+}
