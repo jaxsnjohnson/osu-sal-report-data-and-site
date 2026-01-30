@@ -425,6 +425,7 @@ function generateCardHTML(name, idx) {
     const lastJob = lastSnapshot.Jobs[0] || {};
     // Use simple index-based ID to avoid issues with special characters in names (e.g. O'Connor)
     const cardId = `card-${idx}`;
+    const historyId = `history-${idx}`;
     const safeName = name.replace(/'/g, "\\'"); // For JS string
     const attrName = name.replace(/"/g, '&quot;'); // For HTML attribute
 
@@ -434,7 +435,7 @@ function generateCardHTML(name, idx) {
 
     return `
     <div class="card" id="${cardId}" data-name="${attrName}">
-        <div class="card-header" onclick="toggleCard('${cardId}')">
+        <div class="card-header" onclick="toggleCard('${cardId}')" onkeydown="handleCardKey(event, '${cardId}')" tabindex="0" role="button" aria-expanded="false" aria-controls="${historyId}">
             <div class="person-info">
                 <div class="name-header">
                     <h2>${name}</h2>
@@ -452,7 +453,7 @@ function generateCardHTML(name, idx) {
             </div>
         </div>
 
-        <div class="history">
+        <div id="${historyId}" class="history" role="region" aria-label="Job History">
             <div class="history-meta" style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #444; font-size: 0.9rem; color: #a0a0a0;">
                 <strong>Hired:</strong> ${formatDate(person.Meta["First Hired"])} &nbsp;&bull;&nbsp;
                 <strong>Adj Service:</strong> ${formatDate(person.Meta["Adj Service Date"])}
@@ -585,8 +586,21 @@ function updateStats() {
 
 function toggleCard(id) {
     const el = document.getElementById(id);
-    if(el) el.classList.toggle('expanded');
+    if(el) {
+        el.classList.toggle('expanded');
+        const header = el.querySelector('.card-header');
+        if (header) {
+            header.setAttribute('aria-expanded', el.classList.contains('expanded'));
+        }
+    }
 }
+
+window.handleCardKey = function(e, id) {
+    if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggleCard(id);
+    }
+};
 
 // Infinite Scroll Observer
 let observer;
