@@ -145,6 +145,11 @@ h1 { font-size: 1.5rem; margin-bottom: 10px; color: var(--text-main); }
     user-select: none;
 }
 
+.card-header:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
+}
+
 .person-info h2 { margin: 0 0 5px 0; font-size: 1.1rem; color: var(--primary); }
 .person-info p { margin: 0; font-size: 0.85rem; color: var(--text-muted); }
 
