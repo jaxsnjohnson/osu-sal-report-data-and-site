@@ -13,3 +13,7 @@
 ## 2024-05-25 - Retrofitting Accessibility
 **Learning:** Interactive `div` elements exclude keyboard users unless explicitly patched with `tabindex="0"`, `role="button"`, and `keydown` handlers.
 **Action:** When retrofitting legacy code, ensure the full "ARIA Button" pattern (Role + TabIndex + KeyHandler + ARIA State) is applied if semantic refactoring is too risky.
+
+## 2024-05-26 - Dynamic Heading Hierarchy
+**Learning:** JS-injected content often breaks the document outline (e.g., jumping from H1 to H3) because components are built in isolation.
+**Action:** Explicitly audit the parent container's heading level before defining the component's heading tag (e.g., ensure `H2` is used for primary list items under an `H1`).
