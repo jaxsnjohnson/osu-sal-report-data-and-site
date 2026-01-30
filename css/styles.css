@@ -33,6 +33,34 @@ h1 { font-size: 1.5rem; margin-bottom: 10px; color: var(--text-main); }
     margin-bottom: 10px;
 }
 
+.chip-container {
+    width: 100%;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: -5px;
+    margin-bottom: 10px;
+    min-height: 28px; /* Prevent jump */
+}
+
+.chip {
+    background: #2a2a2a;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.chip:hover {
+    background: #3a3a3a;
+    color: var(--text-main);
+    border-color: var(--primary);
+}
+
 .search-wrapper {
     flex: 2;
     display: flex;
@@ -178,6 +206,32 @@ td { padding: 12px 0; border-bottom: 1px solid var(--border); vertical-align: to
 /* Utility */
 .hidden { display: none; }
 .loader-sentinel { height: 50px; margin: 20px 0; text-align: center; color: var(--text-muted); }
+
+.help-cursor {
+    cursor: help;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+    color: var(--text-muted);
+}
+.help-cursor:hover {
+    color: var(--text-main);
+}
+
+.custom-tooltip {
+    position: fixed;
+    background: #111;
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    pointer-events: none; /* Let mouse pass through */
+    z-index: 9999;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    border: 1px solid #444;
+    max-width: 250px;
+    line-height: 1.4;
+    transition: opacity 0.1s ease;
+}
 
 /* Dashboard & Header Extras */
 .title-row {
@@ -349,6 +403,8 @@ input[type=number] { -moz-appearance: textfield; }
     border-radius: 16px;
     max-width: 500px;
     width: 90%;
+    max-height: 85vh; /* Ensure it fits in viewport */
+    overflow-y: auto; /* Enable internal scrolling */
     box-shadow: 0 10px 25px rgba(0,0,0,0.5);
     position: relative;
     animation: slideUp 0.3s ease;
@@ -364,6 +420,9 @@ input[type=number] { -moz-appearance: textfield; }
 .modal-content h3 { font-size: 1rem; margin-top: 20px; }
 .modal-content ul { padding-left: 20px; color: var(--text-muted); }
 .modal-content li { margin-bottom: 8px; }
+
+.def-list li { margin-bottom: 12px; line-height: 1.5; }
+.def-list strong { color: var(--primary); }
 
 .modal-section {
     margin-bottom: 1.5rem;

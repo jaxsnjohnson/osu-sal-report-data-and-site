@@ -74,6 +74,7 @@ const els = {
     roleInput: document.getElementById('role-filter'),
     salaryMin: document.getElementById('salary-min'),
     salaryMax: document.getElementById('salary-max'),
+    suggestedSearches: document.getElementById('suggested-searches'),
     results: document.getElementById('results'),
     stats: document.getElementById('stats-bar'),
     roleDatalist: document.getElementById('role-list'),
@@ -98,13 +99,20 @@ fetch('data.json')
     .then(data => {
         // Pre-compute search strings for performance
         Object.keys(data).forEach(key => {
-            data[key]._searchStr = (key + " " + JSON.stringify(data[key].Meta)).toLowerCase();
+            const p = data[key];
+            const lastSnap = p.Timeline[p.Timeline.length - 1];
+            const lastJob = (lastSnap && lastSnap.Jobs.length > 0) ? lastSnap.Jobs[0] : {};
+            const role = lastJob['Job Title'] || '';
+            const jobOrg = lastJob['Job Orgn'] || '';
+
+            p._searchStr = (key + " " + JSON.stringify(p.Meta) + " " + role + " " + jobOrg).toLowerCase();
         });
 
         state.masterData = data;
         state.masterKeys = Object.keys(data).sort();
 
         populateRoleOptions(data);
+        renderSuggestedSearches();
 
         // Check for deep link before first render
         const targetName = parseUrlParams();
@@ -116,11 +124,48 @@ fetch('data.json')
         if (targetName) {
             autoExpandTarget(targetName);
         }
+
+        setupTooltips();
     })
     .catch(err => {
         els.stats.innerHTML = "Error loading data.json.";
         console.error(err);
     });
+
+function setupTooltips() {
+    const tooltipEl = document.getElementById('custom-tooltip');
+
+    document.addEventListener('mouseover', (e) => {
+        // Traverse up to find data-tooltip (in case of nested spans)
+        const target = e.target.closest('[data-tooltip]');
+        if (target) {
+            tooltipEl.textContent = target.getAttribute('data-tooltip');
+            tooltipEl.classList.remove('hidden');
+        }
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!tooltipEl.classList.contains('hidden')) {
+            // Add offset to avoid covering cursor
+            const x = e.clientX + 10;
+            const y = e.clientY + 10;
+
+            // Boundary check (basic)
+            const rightEdge = window.innerWidth - tooltipEl.offsetWidth - 20;
+            const bottomEdge = window.innerHeight - tooltipEl.offsetHeight - 20;
+
+            tooltipEl.style.left = `${Math.min(x, rightEdge)}px`;
+            tooltipEl.style.top = `${Math.min(y, bottomEdge)}px`;
+        }
+    });
+
+    document.addEventListener('mouseout', (e) => {
+        const target = e.target.closest('[data-tooltip]');
+        if (target) {
+            tooltipEl.classList.add('hidden');
+        }
+    });
+}
 
 function populateRoleOptions(data) {
     const roles = new Set();
@@ -135,6 +180,23 @@ function populateRoleOptions(data) {
     const sortedRoles = Array.from(roles).sort();
     els.roleDatalist.innerHTML = sortedRoles.map(r => `<option value="${r}">`).join('');
 }
+
+function renderSuggestedSearches() {
+    if (!els.suggestedSearches) return;
+
+    const suggestions = ['Professor', 'Athletics', 'Physics', 'Coach', 'Dean'];
+    els.suggestedSearches.innerHTML = suggestions.map(term =>
+        `<button class="chip" onclick="applySearch('${term}')">${term}</button>`
+    ).join('');
+}
+
+// Exposed globally so onclick works
+window.applySearch = function(term) {
+    els.searchInput.value = term;
+    state.filters.text = term;
+    els.clearBtn.classList.remove('hidden');
+    runSearch();
+};
 
 // Search Logic
 function runSearch() {
@@ -288,8 +350,10 @@ function updateDashboard(stats) {
     const unclassPct = totalTypes ? (stats.unclassified / totalTypes) * 100 : 0;
     els.barClassified.style.width = `${classPct}%`;
     els.barUnclassified.style.width = `${unclassPct}%`;
-    els.barClassified.title = `Classified: ${stats.classified.toLocaleString()} (${Math.round(classPct)}%)`;
-    els.barUnclassified.title = `Unclassified: ${stats.unclassified.toLocaleString()} (${Math.round(unclassPct)}%)`;
+    els.barClassified.setAttribute('data-tooltip', `Classified: ${stats.classified.toLocaleString()} (${Math.round(classPct)}%)`);
+    els.barUnclassified.setAttribute('data-tooltip', `Unclassified: ${stats.unclassified.toLocaleString()} (${Math.round(unclassPct)}%)`);
+    els.barClassified.removeAttribute('title');
+    els.barUnclassified.removeAttribute('title');
     els.countClassified.textContent = stats.classified.toLocaleString();
     els.countUnclassified.textContent = stats.unclassified.toLocaleString();
 
@@ -303,17 +367,17 @@ function updateDashboard(stats) {
     ];
 
     els.tenureChart.innerHTML = `
-        <div class="tenure-seg t1" style="width:${tPcts[0]}%" title="< 2 Years: ${stats.tenure.t0_2}"></div>
-        <div class="tenure-seg t2" style="width:${tPcts[1]}%" title="2-5 Years: ${stats.tenure.t2_5}"></div>
-        <div class="tenure-seg t3" style="width:${tPcts[2]}%" title="5-10 Years: ${stats.tenure.t5_10}"></div>
-        <div class="tenure-seg t4" style="width:${tPcts[3]}%" title="10+ Years: ${stats.tenure.t10_plus}"></div>
+        <div class="tenure-seg t1" style="width:${tPcts[0]}%" data-tooltip="< 2 Years: ${stats.tenure.t0_2}"></div>
+        <div class="tenure-seg t2" style="width:${tPcts[1]}%" data-tooltip="2-5 Years: ${stats.tenure.t2_5}"></div>
+        <div class="tenure-seg t3" style="width:${tPcts[2]}%" data-tooltip="5-10 Years: ${stats.tenure.t5_10}"></div>
+        <div class="tenure-seg t4" style="width:${tPcts[3]}%" data-tooltip="10+ Years: ${stats.tenure.t10_plus}"></div>
     `;
 
     // Leaderboard
     const maxCount = stats.topOrgs[0] ? stats.topOrgs[0][1] : 1;
     els.orgLeaderboard.innerHTML = stats.topOrgs.map(([name, count]) => `
         <div class="lb-row">
-            <div class="lb-label" title="${name}">${name}</div>
+            <div class="lb-label" data-tooltip="${name}">${name}</div>
             <div class="lb-bar-container">
                 <div class="lb-bar" style="width: ${(count/maxCount)*100}%"></div>
                 <div class="lb-val">${count}</div>
@@ -346,7 +410,8 @@ function updateDonut(roles, total) {
     }
 
     els.roleDonut.style.background = `conic-gradient(${gradientParts.join(', ')})`;
-    els.roleDonut.title = roles.map(([r, c]) => `${r}: ${c} (${Math.round(c/total*100)}%)`).join('\n');
+    els.roleDonut.setAttribute('data-tooltip', roles.map(([r, c]) => `${r}: ${c} (${Math.round(c/total*100)}%)`).join('\n'));
+    els.roleDonut.removeAttribute('title');
 
     // Legend
     els.roleLegend.innerHTML = roles.map(([role, count], idx) => `
@@ -373,14 +438,14 @@ function generateCardHTML(name, idx) {
             <div class="person-info">
                 <div class="name-header">
                     <h2>${name}</h2>
-                    <button class="link-btn-card" data-linkname="${attrName}" onclick="copyLink(event, this.dataset.linkname)" aria-label="Copy link to ${attrName}" title="Copy Link">
+                    <button class="link-btn-card" data-linkname="${attrName}" onclick="copyLink(event, this.dataset.linkname)" aria-label="Copy link to ${attrName}" data-tooltip="Copy Link">
                         🔗
                     </button>
                 </div>
                 <p>Home Org: ${person.Meta["Home Orgn"] || 'N/A'}</p>
             </div>
             <div class="latest-stat">
-                <div class="latest-salary" title="Total calculated from all active appointments">
+                <div class="latest-salary" data-tooltip="Total calculated from all active appointments">
                     ${formatMoney(totalPay)}
                 </div>
                 <div class="latest-role">${lastJob['Job Title'] || 'Unknown'}</div>
@@ -397,8 +462,8 @@ function generateCardHTML(name, idx) {
                     <tr>
                         <th>Date & Source</th>
                         <th>Job Details</th>
-                        <th>Type</th>
-                        <th>Salary</th>
+                        <th><span class="help-cursor" data-tooltip="Job Classification Code">Type</span></th>
+                        <th><span class="help-cursor" data-tooltip="Annual Salary Rate (Base Pay)">Salary</span></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -434,10 +499,10 @@ function generateCardHTML(name, idx) {
                                     <div style="font-weight:600;">${job['Job Title'] || ''}</div>
                                     <div style="font-size:0.85rem; color:#64748b;">${job['Job Orgn'] || ''}</div>
                                     <div class="job-meta-grid" style="font-size: 0.8rem; color: #475569; margin-top: 4px; line-height: 1.4;">
-                                        ${job['Rank'] && job['Rank'] !== 'No Rank' ? `<div>Rank: ${job['Rank']} (Eff: ${formatDate(job['Rank Effective Date'])})</div>` : ''}
+                                        ${job['Rank'] && job['Rank'] !== 'No Rank' ? `<div><span class="help-cursor" data-tooltip="Academic or Administrative Rank">Rank: ${job['Rank']}</span> (Eff: ${formatDate(job['Rank Effective Date'])})</div>` : ''}
                                         <div>
-                                            Pos: ${job['Posn-Suff'] || 'N/A'}
-                                            ${job['Appt Percent'] ? `| Appt: ${job['Appt Percent']}%` : ''}
+                                            <span class="help-cursor" data-tooltip="Position Number - Suffix">Pos: ${job['Posn-Suff'] || 'N/A'}</span>
+                                            ${job['Appt Percent'] ? `| <span class="help-cursor" data-tooltip="Appointment Percent (FTE)">Appt: ${job['Appt Percent']}%</span>` : ''}
                                         </div>
                                         <div>
                                             Dates: ${formatDate(job['Appt Begin Date'])} - ${job['Appt End Date'] ? formatDate(job['Appt End Date']) : 'Present'}
@@ -445,7 +510,7 @@ function generateCardHTML(name, idx) {
                                     </div>
                                 </td>
                                 <td>
-                                    <span class="badge badge-type">${job['Job Type'] || '?'}</span>
+                                    <span class="badge badge-type" data-tooltip="Job Type Code">${job['Job Type'] || '?'}</span>
                                 </td>
                                 <td class="money-cell">
                                     ${formatMoney(job['Annual Salary Rate'])}
