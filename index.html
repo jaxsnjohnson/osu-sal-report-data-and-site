@@ -37,15 +37,15 @@
         <div id="stats-dashboard" class="dashboard hidden">
             <!-- Row 1: Key Metrics -->
             <div class="stat-card">
-                <div class="stat-label help-cursor" title="Total number of records in the current view">Total Personnel</div>
+                <div class="stat-label help-cursor" data-tooltip="Total number of records in the current view">Total Personnel</div>
                 <div class="stat-value" id="stat-total">-</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label help-cursor" title="Middle value of all Annual Salary Rates (Base Pay)">Median Salary</div>
+                <div class="stat-label help-cursor" data-tooltip="Middle value of all Annual Salary Rates (Base Pay)">Median Salary</div>
                 <div class="stat-value" id="stat-median">-</div>
             </div>
             <div class="stat-card wide">
-                <div class="stat-label help-cursor" title="Distribution of Classified (Union) vs Unclassified (Faculty/Admin) roles. See 'About' for definitions.">Classification Split</div>
+                <div class="stat-label help-cursor" data-tooltip="Distribution of Classified (Union) vs Unclassified (Faculty/Admin) roles. See 'About' for definitions.">Classification Split</div>
                 <div class="bar-chart-container">
                     <div class="bar-chart">
                         <div id="bar-classified" class="bar-segment classified" style="width: 50%"></div>
@@ -61,7 +61,7 @@
             <!-- Row 2: Deep Dives -->
             <div class="stat-column wide">
                 <div class="stat-card">
-                    <div class="stat-label help-cursor" title="Calculated based on the 'First Hired' date">Years of Service</div>
+                    <div class="stat-label help-cursor" data-tooltip="Calculated based on the 'First Hired' date">Years of Service</div>
                     <div class="tenure-chart" id="tenure-chart">
                         <!-- Injected via JS -->
                     </div>
@@ -74,7 +74,7 @@
                 </div>
 
                 <div class="stat-card">
-                    <div class="stat-label help-cursor" title="Most common job titles in the current filtered set">Top Roles</div>
+                    <div class="stat-label help-cursor" data-tooltip="Most common job titles in the current filtered set">Top Roles</div>
                     <div class="donut-container">
                         <div id="role-donut" class="donut-chart"></div>
                         <div id="role-legend" class="donut-legend"></div>
@@ -83,7 +83,7 @@
             </div>
 
             <div class="stat-card wide full-width-mobile">
-                <div class="stat-label help-cursor" title="Organizations (Depts) with the highest personnel count">Top Organizations</div>
+                <div class="stat-label help-cursor" data-tooltip="Organizations (Depts) with the highest personnel count">Top Organizations</div>
                 <div id="org-leaderboard" class="leaderboard">
                     <!-- Injected via JS -->
                 </div>
@@ -122,6 +122,9 @@
 <script src="js/app.js"></script>
 
 <!-- About Modal -->
+<!-- Custom Tooltip -->
+<div id="custom-tooltip" class="custom-tooltip hidden"></div>
+
 <div id="info-modal" class="modal hidden">
     <div class="modal-content">
         <button id="close-modal" class="close" aria-label="Close modal">&times;</button>
