@@ -701,6 +701,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 infoBtn.focus();
             }
         });
+
+        // Collapsible Sections in Modal
+        const collapseBtns = modal.querySelectorAll('.collapsible-btn');
+        collapseBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const isExpanded = btn.getAttribute('aria-expanded') === 'true';
+                btn.setAttribute('aria-expanded', !isExpanded);
+
+                // Toggle content visibility
+                const content = btn.nextElementSibling;
+                if (content && content.classList.contains('collapsible-content')) {
+                    content.classList.toggle('hidden');
+                }
+            });
+        });
     }
 });
 
