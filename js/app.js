@@ -74,6 +74,7 @@ const els = {
     roleInput: document.getElementById('role-filter'),
     salaryMin: document.getElementById('salary-min'),
     salaryMax: document.getElementById('salary-max'),
+    suggestedSearches: document.getElementById('suggested-searches'),
     results: document.getElementById('results'),
     stats: document.getElementById('stats-bar'),
     roleDatalist: document.getElementById('role-list'),
@@ -98,13 +99,20 @@ fetch('data.json')
     .then(data => {
         // Pre-compute search strings for performance
         Object.keys(data).forEach(key => {
-            data[key]._searchStr = (key + " " + JSON.stringify(data[key].Meta)).toLowerCase();
+            const p = data[key];
+            const lastSnap = p.Timeline[p.Timeline.length - 1];
+            const lastJob = (lastSnap && lastSnap.Jobs.length > 0) ? lastSnap.Jobs[0] : {};
+            const role = lastJob['Job Title'] || '';
+            const jobOrg = lastJob['Job Orgn'] || '';
+
+            p._searchStr = (key + " " + JSON.stringify(p.Meta) + " " + role + " " + jobOrg).toLowerCase();
         });
 
         state.masterData = data;
         state.masterKeys = Object.keys(data).sort();
 
         populateRoleOptions(data);
+        renderSuggestedSearches();
 
         // Check for deep link before first render
         const targetName = parseUrlParams();
@@ -135,6 +143,23 @@ function populateRoleOptions(data) {
     const sortedRoles = Array.from(roles).sort();
     els.roleDatalist.innerHTML = sortedRoles.map(r => `<option value="${r}">`).join('');
 }
+
+function renderSuggestedSearches() {
+    if (!els.suggestedSearches) return;
+
+    const suggestions = ['Professor', 'Athletics', 'Physics', 'Coach', 'Dean'];
+    els.suggestedSearches.innerHTML = suggestions.map(term =>
+        `<button class="chip" onclick="applySearch('${term}')">${term}</button>`
+    ).join('');
+}
+
+// Exposed globally so onclick works
+window.applySearch = function(term) {
+    els.searchInput.value = term;
+    state.filters.text = term;
+    els.clearBtn.classList.remove('hidden');
+    runSearch();
+};
 
 // Search Logic
 function runSearch() {
@@ -397,8 +422,8 @@ function generateCardHTML(name, idx) {
                     <tr>
                         <th>Date & Source</th>
                         <th>Job Details</th>
-                        <th>Type</th>
-                        <th>Salary</th>
+                        <th><span class="help-cursor" title="Job Classification Code">Type</span></th>
+                        <th><span class="help-cursor" title="Annual Salary Rate (Base Pay)">Salary</span></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -434,10 +459,10 @@ function generateCardHTML(name, idx) {
                                     <div style="font-weight:600;">${job['Job Title'] || ''}</div>
                                     <div style="font-size:0.85rem; color:#64748b;">${job['Job Orgn'] || ''}</div>
                                     <div class="job-meta-grid" style="font-size: 0.8rem; color: #475569; margin-top: 4px; line-height: 1.4;">
-                                        ${job['Rank'] && job['Rank'] !== 'No Rank' ? `<div>Rank: ${job['Rank']} (Eff: ${formatDate(job['Rank Effective Date'])})</div>` : ''}
+                                        ${job['Rank'] && job['Rank'] !== 'No Rank' ? `<div><span class="help-cursor" title="Academic or Administrative Rank">Rank: ${job['Rank']}</span> (Eff: ${formatDate(job['Rank Effective Date'])})</div>` : ''}
                                         <div>
-                                            Pos: ${job['Posn-Suff'] || 'N/A'}
-                                            ${job['Appt Percent'] ? `| Appt: ${job['Appt Percent']}%` : ''}
+                                            <span class="help-cursor" title="Position Number - Suffix">Pos: ${job['Posn-Suff'] || 'N/A'}</span>
+                                            ${job['Appt Percent'] ? `| <span class="help-cursor" title="Appointment Percent (FTE)">Appt: ${job['Appt Percent']}%</span>` : ''}
                                         </div>
                                         <div>
                                             Dates: ${formatDate(job['Appt Begin Date'])} - ${job['Appt End Date'] ? formatDate(job['Appt End Date']) : 'Present'}
@@ -445,7 +470,7 @@ function generateCardHTML(name, idx) {
                                     </div>
                                 </td>
                                 <td>
-                                    <span class="badge badge-type">${job['Job Type'] || '?'}</span>
+                                    <span class="badge badge-type" title="Job Type Code">${job['Job Type'] || '?'}</span>
                                 </td>
                                 <td class="money-cell">
                                     ${formatMoney(job['Annual Salary Rate'])}
