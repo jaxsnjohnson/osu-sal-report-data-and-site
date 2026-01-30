@@ -433,6 +433,53 @@ input[type=number] { -moz-appearance: textfield; }
     margin-bottom: 1.5rem;
 }
 
+.collapsible-btn {
+    width: 100%;
+    background: none;
+    border: none;
+    padding: 10px 0;
+    font-size: 1rem;
+    font-weight: bold;
+    color: var(--text-main);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    text-align: left;
+    outline: none;
+    border-bottom: 1px solid var(--border);
+    transition: color 0.2s;
+}
+
+.collapsible-btn:hover,
+.collapsible-btn:focus-visible {
+    color: var(--primary);
+}
+
+.collapsible-btn .icon {
+    font-size: 0.8rem;
+    transition: transform 0.3s ease;
+    color: var(--text-muted);
+}
+
+.collapsible-btn[aria-expanded="true"] .icon {
+    transform: rotate(90deg);
+    color: var(--primary);
+}
+
+/* Remove border for the last item or specific styling?
+   Actually, a border separation is nice.
+*/
+
+.collapsible-content {
+    margin-top: 10px;
+    padding-bottom: 5px;
+}
+
+.collapsible-content.hidden {
+    display: none;
+}
+
 .warning-box {
     background-color: #fff3cd;
     border-left: 5px solid #ffc107;
