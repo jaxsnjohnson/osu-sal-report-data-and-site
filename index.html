@@ -37,15 +37,15 @@
         <div id="stats-dashboard" class="dashboard hidden">
             <!-- Row 1: Key Metrics -->
             <div class="stat-card">
-                <div class="stat-label">Total Personnel</div>
+                <div class="stat-label help-cursor" data-tooltip="Total number of records in the current view">Total Personnel</div>
                 <div class="stat-value" id="stat-total">-</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">Median Salary</div>
+                <div class="stat-label help-cursor" data-tooltip="Middle value of all Annual Salary Rates (Base Pay)">Median Salary</div>
                 <div class="stat-value" id="stat-median">-</div>
             </div>
             <div class="stat-card wide">
-                <div class="stat-label">Classification Split</div>
+                <div class="stat-label help-cursor" data-tooltip="Distribution of Classified (Union) vs Unclassified (Faculty/Admin) roles. See 'About' for definitions.">Classification Split</div>
                 <div class="bar-chart-container">
                     <div class="bar-chart">
                         <div id="bar-classified" class="bar-segment classified" style="width: 50%"></div>
@@ -61,7 +61,7 @@
             <!-- Row 2: Deep Dives -->
             <div class="stat-column wide">
                 <div class="stat-card">
-                    <div class="stat-label">Years of Service</div>
+                    <div class="stat-label help-cursor" data-tooltip="Calculated based on the 'First Hired' date">Years of Service</div>
                     <div class="tenure-chart" id="tenure-chart">
                         <!-- Injected via JS -->
                     </div>
@@ -74,7 +74,7 @@
                 </div>
 
                 <div class="stat-card">
-                    <div class="stat-label">Top Roles</div>
+                    <div class="stat-label help-cursor" data-tooltip="Most common job titles in the current filtered set">Top Roles</div>
                     <div class="donut-container">
                         <div id="role-donut" class="donut-chart"></div>
                         <div id="role-legend" class="donut-legend"></div>
@@ -83,7 +83,7 @@
             </div>
 
             <div class="stat-card wide full-width-mobile">
-                <div class="stat-label">Top Organizations</div>
+                <div class="stat-label help-cursor" data-tooltip="Organizations (Depts) with the highest personnel count">Top Organizations</div>
                 <div id="org-leaderboard" class="leaderboard">
                     <!-- Injected via JS -->
                 </div>
@@ -97,6 +97,7 @@
                 <input type="text" id="search" class="search-bar" placeholder="Search name, org... (Ctrl+F)" aria-label="Search personnel">
                 <button id="clear-search" class="clear-btn hidden" aria-label="Clear search" tabindex="-1">&times;</button>
             </div>
+            <div id="suggested-searches" class="chip-container"></div>
 
             <div class="salary-inputs">
                 <input type="number" id="salary-min" class="filter-input" placeholder="Min Salary" aria-label="Minimum salary">
@@ -121,6 +122,9 @@
 <script src="js/app.js"></script>
 
 <!-- About Modal -->
+<!-- Custom Tooltip -->
+<div id="custom-tooltip" class="custom-tooltip hidden"></div>
+
 <div id="info-modal" class="modal hidden">
     <div class="modal-content">
         <button id="close-modal" class="close" aria-label="Close modal">&times;</button>
@@ -151,7 +155,19 @@
 
         <div class="modal-section">
             <h3>Definitions</h3>
-            <ul>
+            <ul class="def-list">
+                <li>
+                    <strong>Appt Percent:</strong> The percentage of a full-time appointment (FTE). E.g., 50% means the employee works half-time (0.5 FTE).
+                </li>
+                <li>
+                    <strong>Annual Salary Rate:</strong> The base salary rate if the position were 100% full-time (1.0 FTE). Actual earnings are calculated as (Salary Rate × Appt Percent).
+                </li>
+                <li>
+                    <strong>Posn-Suff:</strong> Position Number and Suffix. A unique identifier for a specific job seat within the university system.
+                </li>
+                <li>
+                    <strong>Adj Service Date:</strong> The date used to calculate seniority and benefits, which may differ from the original "First Hired" date due to breaks in service.
+                </li>
                 <li>
                     <strong>Classified:</strong> Roles represented by
                     <a href="https://seiu503.org" target="_blank">SEIU 503</a>
