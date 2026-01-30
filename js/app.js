@@ -152,14 +152,17 @@ function runSearch() {
 
         // 2. Type Match (Classified / Unclassified)
         if (typeFilter !== 'all') {
-            const hasType = person.Timeline.some(snap => {
-                const src = snap.Source.toLowerCase();
-                const isUnclass = src.includes('unclass');
-                if (typeFilter === 'unclassified') return isUnclass;
-                if (typeFilter === 'classified') return src.includes('class') && !isUnclass;
-                return false;
-            });
-            if (!hasType) return false;
+            const lastSnap = person.Timeline[person.Timeline.length - 1];
+            if (!lastSnap) return false;
+
+            const src = lastSnap.Source.toLowerCase();
+            const isUnclass = src.includes('unclass');
+
+            if (typeFilter === 'unclassified') {
+                if (!isUnclass) return false;
+            } else if (typeFilter === 'classified') {
+                if (!src.includes('class') || isUnclass) return false;
+            }
         }
 
         // 3. Role Match
