@@ -9,3 +9,7 @@
 ## 2024-05-24 - Zero-Dependency Tooltips
 **Learning:** For CSS-only charts (like conic-gradients) where individual DOM elements don't exist for segments, placing a `title` attribute on the container provides essential data context without external libraries.
 **Action:** Always populate the `title` attribute with a data summary (e.g., "Role A: 20%, Role B: 15%") for complex CSS visualizations.
+
+## 2024-05-25 - Retrofitting Accessibility
+**Learning:** Interactive `div` elements exclude keyboard users unless explicitly patched with `tabindex="0"`, `role="button"`, and `keydown` handlers.
+**Action:** When retrofitting legacy code, ensure the full "ARIA Button" pattern (Role + TabIndex + KeyHandler + ARIA State) is applied if semantic refactoring is too risky.
