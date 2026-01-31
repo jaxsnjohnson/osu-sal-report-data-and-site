@@ -52,16 +52,9 @@ const isPersonActive = (person) => {
 const generateSparkline = (timeline) => {
     if (!timeline || timeline.length === 0) return '';
 
-    // 1. Prepare Data
-    const dataPoints = timeline.map(snap => ({
-        date: snap._dateObj,
-        val: snap._pay,
-        dateStr: snap.Date
-    }));
-
-    // 2. Check Duration (< 3 Years)
-    const startTime = dataPoints[0].date.getTime();
-    const endTime = dataPoints[dataPoints.length - 1].date.getTime();
+    // 1. Prepare Data & Check Duration (< 3 Years)
+    const startTime = timeline[0]._ts;
+    const endTime = timeline[timeline.length - 1]._ts;
     // 365.25 days in milliseconds
     const yearsDiff = (endTime - startTime) / 31557600000; 
     
@@ -74,10 +67,15 @@ const generateSparkline = (timeline) => {
         `;
     }
 
-    // 3. Dynamic Y-Axis Bounds (Lowest to Highest)
-    const vals = dataPoints.map(d => d.val);
-    let minVal = Math.min(...vals);
-    let maxVal = Math.max(...vals);
+    // 2. Dynamic Y-Axis Bounds (Lowest to Highest)
+    let minVal = timeline[0]._pay;
+    let maxVal = minVal;
+
+    for (let i = 1; i < timeline.length; i++) {
+        const val = timeline[i]._pay;
+        if (val < minVal) minVal = val;
+        if (val > maxVal) maxVal = val;
+    }
 
     // Handle flat-line case to prevent division by zero
     if (minVal === maxVal) {
@@ -95,18 +93,19 @@ const generateSparkline = (timeline) => {
     let d = `M`;
     let dots = '';
 
-    dataPoints.forEach((pt, i) => {
-        const x = ((pt.date.getTime() - startTime) / timeSpan) * (width - 2 * padding) + padding;
-        const y = height - padding - (((pt.val - minVal) / valSpan) * (height - 2 * padding));
+    for (let i = 0; i < timeline.length; i++) {
+        const pt = timeline[i];
+        const x = ((pt._ts - startTime) / timeSpan) * (width - 2 * padding) + padding;
+        const y = height - padding - (((pt._pay - minVal) / valSpan) * (height - 2 * padding));
         
         d += `${i === 0 ? '' : ' L'}${x},${y}`;
         
         // INTERACTIVE DOT: Uses data-tooltip for instant custom hover
-        dots += `<circle cx="${x}" cy="${y}" r="8" fill="transparent" stroke="none" style="cursor: pointer;" data-tooltip="${pt.dateStr}: ${formatMoney(pt.val)}"></circle>`;
+        dots += `<circle cx="${x}" cy="${y}" r="8" fill="transparent" stroke="none" style="cursor: pointer;" data-tooltip="${pt.Date}: ${formatMoney(pt._pay)}"></circle>`;
         
         // Visual Dot (Visual only, no events)
         dots += `<circle cx="${x}" cy="${y}" r="3" fill="#4ade80" opacity="0.9" style="pointer-events:none;" />`;
-    });
+    }
 
     return `
         <div class="sparkline-container" style="width:100%; height:${height}px; position: relative; background: rgba(255,255,255,0.03); border-radius: 4px; border: 1px solid rgba(255,255,255,0.05);">
@@ -232,7 +231,7 @@ fetch('data.json')
 
                     // Pre-calculate pay and date object for sparklines
                     snap._pay = calculateSnapshotPay(snap);
-                    snap._dateObj = new Date(snap.Date);
+                    snap._ts = new Date(snap.Date).getTime();
 
                     // History Stats Logic
                     const date = snap.Date;
