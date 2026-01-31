@@ -30,18 +30,13 @@ const calculateSnapshotPay = (snapshot) => {
     if (!snapshot || !snapshot.Jobs) return 0;
     let total = 0;
     snapshot.Jobs.forEach(job => {
-        const rate = cleanMoney(job['Annual Salary Rate']);
+        // Optimized: Use pre-parsed _rate if available, else parseFloat directly
+        const rate = job._rate !== undefined ? job._rate : (parseFloat(job['Annual Salary Rate']) || 0);
         let pct = parseFloat(job['Appt Percent']);
         if (isNaN(pct)) pct = 0;
         if (rate > 0) total += rate * (pct / 100);
     });
     return total;
-};
-
-const getPersonTotalPay = (person) => {
-    if (!person || !person.Timeline || person.Timeline.length === 0) return 0;
-    const lastSnapshot = person.Timeline[person.Timeline.length - 1];
-    return calculateSnapshotPay(lastSnapshot);
 };
 
 const isPersonActive = (person) => {
@@ -194,15 +189,15 @@ fetch('data.json')
         Object.keys(data).forEach(key => {
             const p = data[key];
 
-            // Pre-calculate Pay (Optimization)
-            p._totalPay = getPersonTotalPay(p);
-
             if (p.Timeline && p.Timeline.length > 0) {
-                const lastSnap = p.Timeline[p.Timeline.length - 1];
+                const lastIdx = p.Timeline.length - 1;
+                const lastSnap = p.Timeline[lastIdx];
                 const lastJob = (lastSnap.Jobs && lastSnap.Jobs.length > 0) ? lastSnap.Jobs[0] : {};
                 const role = lastJob['Job Title'] || '';
                 const jobOrg = lastJob['Job Orgn'] || '';
-                p._searchStr = (key + " " + JSON.stringify(p.Meta) + " " + role + " " + jobOrg).toLowerCase();
+
+                // Optimized search string: Avoid JSON.stringify and only use relevant fields
+                p._searchStr = (key + " " + (p.Meta["Home Orgn"]||"") + " " + (p.Meta["First Hired"]||"") + " " + role + " " + jobOrg).toLowerCase();
 
                 // Cache Active Status (Optimization)
                 p._lastDate = lastSnap.Date;
@@ -218,7 +213,17 @@ fetch('data.json')
                 }
 
                 // Unified Timeline Iteration (History + Roles)
-                p.Timeline.forEach(snap => {
+                p.Timeline.forEach((snap, idx) => {
+                    // Optimization: Pre-parse salary rates and collect roles
+                    if (snap.Jobs) {
+                        snap.Jobs.forEach(job => {
+                            if (job._rate === undefined) {
+                                job._rate = parseFloat(job['Annual Salary Rate']) || 0;
+                            }
+                            if (job['Job Title']) allRoles.add(job['Job Title']);
+                        });
+                    }
+
                     // History Stats Logic
                     const date = snap.Date;
                     if (!statsMap[date]) {
@@ -230,14 +235,15 @@ fetch('data.json')
                     if (src.includes('unclass')) statsMap[date].unclassified++;
                     else statsMap[date].classified++;
 
-                    // Role Collection Logic
-                    if (snap.Jobs) snap.Jobs.forEach(job => {
-                        if (job['Job Title']) allRoles.add(job['Job Title']);
-                    });
+                    // Set p._totalPay if this is the last snapshot
+                    if (idx === lastIdx) {
+                        p._totalPay = pay;
+                    }
                 });
 
             } else {
                 p._searchStr = key.toLowerCase();
+                p._totalPay = 0;
             }
         });
 
@@ -622,7 +628,7 @@ function generateCardHTML(name, idx) {
     const cardId = `card-${idx}`;
     const historyId = `history-${idx}`;
     const attrName = name.replace(/"/g, '&quot;');
-    const totalPay = getPersonTotalPay(person);
+    const totalPay = person._totalPay || 0;
     const reversedTimeline = person.Timeline.slice().reverse();
 
     const isLatest = isPersonActive(person);
@@ -661,7 +667,10 @@ function generateCardHTML(name, idx) {
                             if (prevSnap && prevSnap.Jobs) {
                                 const prevJob = prevSnap.Jobs.find(j => j['Posn-Suff'] === job['Posn-Suff']);
                                 if (prevJob) {
-                                    const currRate = cleanMoney(job['Annual Salary Rate']), prevRate = cleanMoney(prevJob['Annual Salary Rate']), diff = currRate - prevRate;
+                                    // Optimization: Use pre-parsed _rate
+                                    const currRate = job._rate !== undefined ? job._rate : cleanMoney(job['Annual Salary Rate']);
+                                    const prevRate = prevJob._rate !== undefined ? prevJob._rate : cleanMoney(prevJob['Annual Salary Rate']);
+                                    const diff = currRate - prevRate;
                                     if (diff !== 0 && prevRate > 0) {
                                         const pct = (diff / prevRate) * 100;
                                         diffHTML = `<span class="diff-val ${diff > 0 ? 'diff-positive' : 'diff-negative'}">${diff > 0 ? '+' : ''}${formatMoney(diff)} (${diff > 0 ? '+' : ''}${pct.toFixed(1)}%)</span>`;
