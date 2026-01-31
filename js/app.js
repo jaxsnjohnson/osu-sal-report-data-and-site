@@ -186,6 +186,7 @@ fetch('data.json')
 
         Object.keys(data).forEach(key => {
             const p = data[key];
+            const uniqueRoles = new Set();
 
             if (p.Timeline && p.Timeline.length > 0) {
                 const lastIdx = p.Timeline.length - 1;
@@ -234,7 +235,10 @@ fetch('data.json')
                                 job._pct = parseFloat(job['Appt Percent']);
                                 if (isNaN(job._pct)) job._pct = 0;
                             }
-                            if (job['Job Title']) allRoles.add(job['Job Title']);
+                            if (job['Job Title']) {
+                                allRoles.add(job['Job Title']);
+                                uniqueRoles.add(job['Job Title'].toLowerCase());
+                            }
                         });
                     }
 
@@ -259,9 +263,12 @@ fetch('data.json')
                     }
                 });
 
+                p._roleStr = Array.from(uniqueRoles).join('\0');
+
             } else {
                 p._searchStr = key.toLowerCase();
                 p._totalPay = 0;
+                p._roleStr = "";
             }
         });
 
@@ -469,10 +476,7 @@ function runSearch() {
 
         // Role Filter
         if (roleFilter) {
-            const hasRole = person.Timeline.some(snap =>
-                snap.Jobs && snap.Jobs.some(job => (job['Job Title'] || '').toLowerCase().includes(roleFilter))
-            );
-            if (!hasRole) return false;
+            if (!person._roleStr || !person._roleStr.includes(roleFilter)) return false;
         }
 
         // Salary Range (Optimized)
