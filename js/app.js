@@ -16,6 +16,8 @@ const cleanMoney = (val) => {
     return parseFloat(cleanStr) || 0;
 };
 
+const MS_PER_YEAR = 1000 * 60 * 60 * 24 * 365.25;
+
 const formatDate = (dateStr) => {
     if (!dateStr || dateStr === "Unknown Date") return dateStr;
     const parts = dateStr.split('-');
@@ -55,8 +57,7 @@ const generateSparkline = (timeline) => {
     // 1. Prepare Data & Check Duration (< 3 Years)
     const startTime = timeline[0]._ts;
     const endTime = timeline[timeline.length - 1]._ts;
-    // 365.25 days in milliseconds
-    const yearsDiff = (endTime - startTime) / 31557600000; 
+    const yearsDiff = (endTime - startTime) / MS_PER_YEAR;
     
     // IF LESS THAN 3 YEARS: Return text only, do not render chart
     if (yearsDiff < 3) {
@@ -195,6 +196,14 @@ fetch('data.json')
 
                 // Optimized search string: Avoid JSON.stringify and only use relevant fields
                 p._searchStr = (key + " " + (p.Meta["Home Orgn"]||"") + " " + (p.Meta["First Hired"]||"") + " " + role + " " + jobOrg).toLowerCase();
+
+                // Optimization: Pre-parse First Hired date
+                const hiredStr = p.Meta['First Hired'];
+                p._hiredDateTs = 0;
+                if (hiredStr) {
+                    const d = new Date(hiredStr);
+                    if (!isNaN(d)) p._hiredDateTs = d.getTime();
+                }
 
                 // Cache Active Status (Optimization)
                 p._lastDate = lastSnap.Date;
@@ -486,9 +495,9 @@ function runSearch() {
             case 'salary-asc':
                 return pA._totalPay - pB._totalPay;
             case 'tenure-desc':
-                return (new Date(pA.Meta["First Hired"] || 0)) - (new Date(pB.Meta["First Hired"] || 0)); // Older date = Higher Tenure
+                return pA._hiredDateTs - pB._hiredDateTs; // Older date = Higher Tenure
             case 'tenure-asc':
-                return (new Date(pB.Meta["First Hired"] || 0)) - (new Date(pA.Meta["First Hired"] || 0)); // Newer date = Lower Tenure
+                return pB._hiredDateTs - pA._hiredDateTs; // Newer date = Lower Tenure
             case 'name-desc':
                 return keyB.localeCompare(keyA);
             case 'name-asc':
@@ -511,7 +520,7 @@ function calculateStats(keys) {
     let count = 0, classified = 0, unclassified = 0, salaries = [];
     let orgs = {}, roles = {};
     let tenure = { t0_2: 0, t2_5: 0, t5_10: 0, t10_plus: 0 };
-    const now = new Date();
+    const now = new Date().getTime();
 
     keys.forEach(key => {
         const p = state.masterData[key];
@@ -535,16 +544,14 @@ function calculateStats(keys) {
         const role = lastJob['Job Title'] || 'Unknown';
         roles[role] = (roles[role] || 0) + 1;
 
-        const hiredStr = p.Meta['First Hired'];
-        if (hiredStr) {
-            const hiredDate = new Date(hiredStr);
-            if (!isNaN(hiredDate)) {
-                const years = (now - hiredDate) / (1000 * 60 * 60 * 24 * 365.25);
-                if (years < 2) tenure.t0_2++;
-                else if (years < 5) tenure.t2_5++;
-                else if (years < 10) tenure.t5_10++;
-                else tenure.t10_plus++;
-            }
+        // Optimization: Use pre-parsed _hiredDateTs
+        const hiredTs = p._hiredDateTs;
+        if (hiredTs) {
+            const years = (now - hiredTs) / MS_PER_YEAR;
+            if (years < 2) tenure.t0_2++;
+            else if (years < 5) tenure.t2_5++;
+            else if (years < 10) tenure.t5_10++;
+            else tenure.t10_plus++;
         }
     });
 
