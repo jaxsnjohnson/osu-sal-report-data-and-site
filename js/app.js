@@ -40,14 +40,11 @@ const calculateSnapshotPay = (snapshot) => {
 };
 
 const isPersonActive = (person) => {
-    if (!person || !person.Timeline || person.Timeline.length === 0) return false;
-    const lastSnap = person.Timeline[person.Timeline.length - 1];
-    const src = (lastSnap.Source || "").toLowerCase();
-    const isUnclass = src.includes('unclass');
+    if (!person || !person._lastDate) return false;
     
-    return isUnclass 
-        ? (!state.latestUnclassDate || lastSnap.Date === state.latestUnclassDate)
-        : (!state.latestClassDate || lastSnap.Date === state.latestClassDate);
+    return person._isUnclass
+        ? (!state.latestUnclassDate || person._lastDate === state.latestUnclassDate)
+        : (!state.latestClassDate || person._lastDate === state.latestClassDate);
 };
 
 // --- UPDATED SPARKLINE FUNCTION ---
