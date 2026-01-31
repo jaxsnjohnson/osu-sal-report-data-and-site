@@ -32,8 +32,9 @@ const calculateSnapshotPay = (snapshot) => {
     snapshot.Jobs.forEach(job => {
         // Optimized: Use pre-parsed _rate if available, else parseFloat directly
         const rate = job._rate !== undefined ? job._rate : (parseFloat(job['Annual Salary Rate']) || 0);
-        let pct = parseFloat(job['Appt Percent']);
-        if (isNaN(pct)) pct = 0;
+        // Optimized: Use pre-parsed _pct if available
+        const pct = job._pct !== undefined ? job._pct : (parseFloat(job['Appt Percent']) || 0);
+
         if (rate > 0) total += rate * (pct / 100);
     });
     return total;
@@ -216,6 +217,11 @@ fetch('data.json')
                         snap.Jobs.forEach(job => {
                             if (job._rate === undefined) {
                                 job._rate = parseFloat(job['Annual Salary Rate']) || 0;
+                            }
+                            // Optimization: Pre-parse appt percent
+                            if (job._pct === undefined) {
+                                job._pct = parseFloat(job['Appt Percent']);
+                                if (isNaN(job._pct)) job._pct = 0;
                             }
                             if (job['Job Title']) allRoles.add(job['Job Title']);
                         });
