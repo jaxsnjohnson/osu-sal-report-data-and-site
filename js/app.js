@@ -54,10 +54,10 @@ const generateSparkline = (timeline) => {
 
     // 1. Prepare Data
     const dataPoints = timeline.map(snap => ({
-        date: new Date(snap.Date),
-        val: calculateSnapshotPay(snap),
+        date: snap._dateObj,
+        val: snap._pay,
         dateStr: snap.Date
-    })).sort((a, b) => a.date - b.date);
+    }));
 
     // 2. Check Duration (< 3 Years)
     const startTime = dataPoints[0].date.getTime();
@@ -211,6 +211,9 @@ fetch('data.json')
                 }
 
                 // Unified Timeline Iteration (History + Roles)
+                // Sort timeline once during initialization
+                p.Timeline.sort((a, b) => (a.Date || "").localeCompare(b.Date || ""));
+
                 p.Timeline.forEach((snap, idx) => {
                     // Optimization: Pre-parse salary rates and collect roles
                     if (snap.Jobs) {
@@ -226,6 +229,10 @@ fetch('data.json')
                             if (job['Job Title']) allRoles.add(job['Job Title']);
                         });
                     }
+
+                    // Pre-calculate pay and date object for sparklines
+                    snap._pay = calculateSnapshotPay(snap);
+                    snap._dateObj = new Date(snap.Date);
 
                     // History Stats Logic
                     const date = snap.Date;
