@@ -188,9 +188,15 @@ fetch('data.json')
     .then(data => {
         let maxClassDate = "";
         let maxUnclassDate = "";
+        const allRoles = new Set();
+        const statsMap = {};
 
         Object.keys(data).forEach(key => {
             const p = data[key];
+
+            // Pre-calculate Pay (Optimization)
+            p._totalPay = getPersonTotalPay(p);
+
             if (p.Timeline && p.Timeline.length > 0) {
                 const lastSnap = p.Timeline[p.Timeline.length - 1];
                 const lastJob = (lastSnap.Jobs && lastSnap.Jobs.length > 0) ? lastSnap.Jobs[0] : {};
@@ -198,14 +204,38 @@ fetch('data.json')
                 const jobOrg = lastJob['Job Orgn'] || '';
                 p._searchStr = (key + " " + JSON.stringify(p.Meta) + " " + role + " " + jobOrg).toLowerCase();
 
+                // Cache Active Status (Optimization)
+                p._lastDate = lastSnap.Date;
+                p._lastSource = (lastSnap.Source || "").toLowerCase();
+                p._isUnclass = p._lastSource.includes('unclass');
+
                 if (lastSnap.Date) {
-                    const src = (lastSnap.Source || "").toLowerCase();
-                    if (src.includes('unclass')) {
+                    if (p._isUnclass) {
                         if (lastSnap.Date > maxUnclassDate) maxUnclassDate = lastSnap.Date;
                     } else {
                         if (lastSnap.Date > maxClassDate) maxClassDate = lastSnap.Date;
                     }
                 }
+
+                // Unified Timeline Iteration (History + Roles)
+                p.Timeline.forEach(snap => {
+                    // History Stats Logic
+                    const date = snap.Date;
+                    if (!statsMap[date]) {
+                        statsMap[date] = { date: date, classified: 0, unclassified: 0, payroll: 0 };
+                    }
+                    const src = (snap.Source || "").toLowerCase();
+                    const pay = calculateSnapshotPay(snap);
+                    statsMap[date].payroll += pay;
+                    if (src.includes('unclass')) statsMap[date].unclassified++;
+                    else statsMap[date].classified++;
+
+                    // Role Collection Logic
+                    if (snap.Jobs) snap.Jobs.forEach(job => {
+                        if (job['Job Title']) allRoles.add(job['Job Title']);
+                    });
+                });
+
             } else {
                 p._searchStr = key.toLowerCase();
             }
@@ -213,11 +243,13 @@ fetch('data.json')
 
         state.latestClassDate = maxClassDate;
         state.latestUnclassDate = maxUnclassDate;
-        state.historyStats = processHistoricalData(data);
+        state.historyStats = Object.values(statsMap).sort((a, b) => new Date(a.date) - new Date(b.date));
         state.masterData = data;
         state.masterKeys = Object.keys(data).sort();
 
-        populateRoleOptions(data);
+        // Populate Roles
+        els.roleDatalist.innerHTML = Array.from(allRoles).sort().map(r => `<option value="\${r}">`).join('');
+
         renderSuggestedSearches();
         
         const targetName = parseUrlParams(); 
@@ -240,27 +272,6 @@ fetch('data.json')
         console.error(err);
     });
 
-// ==========================================
-// HISTORICAL DATA LOGIC
-// ==========================================
-function processHistoricalData(data) {
-    const statsMap = {};
-    Object.values(data).forEach(person => {
-        if (!person.Timeline) return;
-        person.Timeline.forEach(snap => {
-            const date = snap.Date;
-            if (!statsMap[date]) {
-                statsMap[date] = { date: date, classified: 0, unclassified: 0, payroll: 0 };
-            }
-            const src = (snap.Source || "").toLowerCase();
-            const pay = calculateSnapshotPay(snap);
-            statsMap[date].payroll += pay;
-            if (src.includes('unclass')) statsMap[date].unclassified++;
-            else statsMap[date].classified++;
-        });
-    });
-    return Object.values(statsMap).sort((a, b) => new Date(a.date) - new Date(b.date));
-}
 
 // ==========================================
 // INTERACTIVE CHARTS
@@ -403,8 +414,12 @@ function runSearch() {
     let results = state.masterKeys.filter(name => {
         const person = state.masterData[name];
         
-        // Active/Inactive Check
-        const isActive = isPersonActive(person);
+        // Active/Inactive Check (Optimized)
+        // If _lastDate is missing, treat as inactive (or empty data)
+        const isActive = person._lastDate && (person._isUnclass
+            ? (!state.latestUnclassDate || person._lastDate === state.latestUnclassDate)
+            : (!state.latestClassDate || person._lastDate === state.latestClassDate));
+
         if (!showInactive && !isActive) return false;
 
         // Search Text
@@ -422,14 +437,10 @@ function runSearch() {
             if (!isFT) return false;
         }
 
-        // Type Filter
+        // Type Filter (Optimized with cached _isUnclass)
         if (typeFilter !== 'all') {
-            const lastSnap = person.Timeline[person.Timeline.length - 1];
-            if (!lastSnap) return false;
-            const src = (lastSnap.Source || "").toLowerCase();
-            const isUnclass = src.includes('unclass');
-            if (typeFilter === 'unclassified' && !isUnclass) return false;
-            if (typeFilter === 'classified' && (isUnclass || !src.includes('class'))) return false;
+            if (typeFilter === 'unclassified' && !person._isUnclass) return false;
+            if (typeFilter === 'classified' && person._isUnclass) return false;
         }
 
         // Role Filter
@@ -440,9 +451,9 @@ function runSearch() {
             if (!hasRole) return false;
         }
 
-        // Salary Range
+        // Salary Range (Optimized)
         if (minSalary !== null || maxSalary !== null) {
-            const salary = getPersonTotalPay(person);
+            const salary = person._totalPay;
             if (minSalary !== null && salary < minSalary) return false;
             if (maxSalary !== null && salary > maxSalary) return false;
         }
@@ -456,9 +467,9 @@ function runSearch() {
 
         switch (sort) {
             case 'salary-desc':
-                return getPersonTotalPay(pB) - getPersonTotalPay(pA);
+                return pB._totalPay - pA._totalPay;
             case 'salary-asc':
-                return getPersonTotalPay(pA) - getPersonTotalPay(pB);
+                return pA._totalPay - pB._totalPay;
             case 'tenure-desc':
                 return (new Date(pA.Meta["First Hired"] || 0)) - (new Date(pB.Meta["First Hired"] || 0)); // Older date = Higher Tenure
             case 'tenure-asc':
@@ -494,18 +505,17 @@ function calculateStats(keys) {
         // Current logic: Stats reflect exactly what is in the filtered list.
         
         if (!p.Timeline || p.Timeline.length === 0) return;
-        const lastSnap = p.Timeline[p.Timeline.length - 1];
-        const src = (lastSnap.Source || "").toLowerCase();
-        const isUnclass = src.includes('unclass');
-        
+
         count++; 
-        const salary = getPersonTotalPay(p);
+        // Optimization: Use cached pay and status
+        const salary = p._totalPay;
         if (salary > 0) salaries.push(salary);
-        if (isUnclass) unclassified++; else classified++;
+        if (p._isUnclass) unclassified++; else classified++;
 
         const org = personOrg(p) || 'Unknown';
         orgs[org] = (orgs[org] || 0) + 1;
         
+        const lastSnap = p.Timeline[p.Timeline.length - 1];
         const lastJob = (lastSnap.Jobs && lastSnap.Jobs.length > 0) ? lastSnap.Jobs[0] : {};
         const role = lastJob['Job Title'] || 'Unknown';
         roles[role] = (roles[role] || 0) + 1;
@@ -777,15 +787,6 @@ function showToast(msg) {
     t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000);
 }
 
-function populateRoleOptions(data) {
-    const roles = new Set();
-    Object.values(data).forEach(person => {
-        if (person.Timeline) person.Timeline.forEach(snap => {
-            if (snap.Jobs) snap.Jobs.forEach(job => { if (job['Job Title']) roles.add(job['Job Title']); });
-        });
-    });
-    els.roleDatalist.innerHTML = Array.from(roles).sort().map(r => `<option value="${r}">`).join('');
-}
 function renderSuggestedSearches() {
     if (!els.suggestedSearches) return;
     els.suggestedSearches.innerHTML = ['Professor', 'Athletics', 'Physics', 'Coach', 'Dean'].map(term =>
