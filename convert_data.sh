@@ -143,7 +143,11 @@ def parse_single_file(filepath):
 for txt_file in FILES: parse_single_file(txt_file)
 
 for person in database:
+    # Sort the timeline by date
     database[person]["Timeline"].sort(key=lambda x: x["Date"])
+    
+    # NEW: Aggregate a list of all reports (sources) this person appears in
+    database[person]["Reports"] = [entry["Source"] for entry in database[person]["Timeline"]]
 
 print(json.dumps(database, indent=2))
 EOF

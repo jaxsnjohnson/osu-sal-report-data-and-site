@@ -1,72 +1,144 @@
-// Utility: Format currency safely
+// ==========================================
+// UTILITIES
+// ==========================================
+
 const formatMoney = (amount) => {
     if (!amount && amount !== 0) return '-';
-    const num = parseFloat(amount.toString().replace(/,/g, ''));
+    const num = parseFloat(amount.toString().replace(/[^0-9.-]+/g, ''));
     if (isNaN(num)) return amount;
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(num);
 };
 
-// Utility: Clean money string to number
 const cleanMoney = (val) => {
     if (!val) return 0;
     if (typeof val === 'number') return val;
-    return parseFloat(val.toString().replace(/,/g, '')) || 0;
+    const cleanStr = val.toString().replace(/[^0-9.-]+/g, '');
+    return parseFloat(cleanStr) || 0;
 };
 
-// Utility: Calculate total pay for the latest snapshot
-const getPersonTotalPay = (person) => {
-    if (!person || !person.Timeline || person.Timeline.length === 0) return 0;
-
-    const lastSnapshot = person.Timeline[person.Timeline.length - 1];
-    if (!lastSnapshot.Jobs) return 0;
-
-    let total = 0;
-    lastSnapshot.Jobs.forEach(job => {
-        const rate = cleanMoney(job['Annual Salary Rate']);
-        // Parse Appt Percent, default to 100 if missing or invalid, then divide by 100
-        let pct = parseFloat(job['Appt Percent']);
-        if (isNaN(pct)) pct = 0;
-
-        if (rate > 0) {
-             total += rate * (pct / 100);
-        }
-    });
-    return total;
-};
-
-// Utility: Format date nicely
 const formatDate = (dateStr) => {
     if (!dateStr || dateStr === "Unknown Date") return dateStr;
     const parts = dateStr.split('-');
     if (parts.length === 3) {
-        // Handle YYYY-MM-DD
-        if (parts[0].length === 4) {
-            return `${parts[1]}/${parts[2]}/${parts[0]}`;
-        }
-        // Handle DD-MON-YYYY (return as is, e.g., 01-AUG-2022)
+        if (parts[0].length === 4) return `${parts[1]}/${parts[2]}/${parts[0]}`; 
         return dateStr;
     }
     return dateStr;
 };
 
-// Global State
+const calculateSnapshotPay = (snapshot) => {
+    if (!snapshot || !snapshot.Jobs) return 0;
+    let total = 0;
+    snapshot.Jobs.forEach(job => {
+        const rate = cleanMoney(job['Annual Salary Rate']);
+        let pct = parseFloat(job['Appt Percent']);
+        if (isNaN(pct)) pct = 0;
+        if (rate > 0) total += rate * (pct / 100);
+    });
+    return total;
+};
+
+const getPersonTotalPay = (person) => {
+    if (!person || !person.Timeline || person.Timeline.length === 0) return 0;
+    const lastSnapshot = person.Timeline[person.Timeline.length - 1];
+    return calculateSnapshotPay(lastSnapshot);
+};
+
+// --- UPDATED SPARKLINE FUNCTION ---
+const generateSparkline = (timeline) => {
+    if (!timeline || timeline.length === 0) return '';
+
+    // 1. Prepare Data
+    const dataPoints = timeline.map(snap => ({
+        date: new Date(snap.Date),
+        val: calculateSnapshotPay(snap),
+        dateStr: snap.Date
+    })).sort((a, b) => a.date - b.date);
+
+    // 2. Check Duration (< 3 Years)
+    const startTime = dataPoints[0].date.getTime();
+    const endTime = dataPoints[dataPoints.length - 1].date.getTime();
+    // 365.25 days in milliseconds
+    const yearsDiff = (endTime - startTime) / 31557600000; 
+    
+    // IF LESS THAN 3 YEARS: Return text only, do not render chart
+    if (yearsDiff < 3) {
+        return `
+            <div style="padding: 20px; text-align: center; color: #888; font-size: 0.85rem; background: rgba(255,255,255,0.03); border-radius: 4px;">
+                ⚠️ History covers less than 3 years. Trend chart available for longer tenures only.
+            </div>
+        `;
+    }
+
+    // 3. Dynamic Y-Axis Bounds (Lowest to Highest)
+    const vals = dataPoints.map(d => d.val);
+    let minVal = Math.min(...vals);
+    let maxVal = Math.max(...vals);
+
+    // Handle flat-line case to prevent division by zero
+    if (minVal === maxVal) {
+        maxVal = minVal + 1000; 
+        minVal = minVal - 1000;
+    }
+
+    const width = 600; 
+    const height = 100;
+    const padding = 15;
+
+    const timeSpan = endTime - startTime || 1;
+    const valSpan = maxVal - minVal || 1;
+
+    let d = `M`;
+    let dots = '';
+
+    dataPoints.forEach((pt, i) => {
+        const x = ((pt.date.getTime() - startTime) / timeSpan) * (width - 2 * padding) + padding;
+        const y = height - padding - (((pt.val - minVal) / valSpan) * (height - 2 * padding));
+        
+        d += `${i === 0 ? '' : ' L'}${x},${y}`;
+        
+        // INTERACTIVE DOT: Uses data-tooltip for instant custom hover
+        dots += `<circle cx="${x}" cy="${y}" r="8" fill="transparent" stroke="none" style="cursor: pointer;" data-tooltip="${pt.dateStr}: ${formatMoney(pt.val)}"></circle>`;
+        
+        // Visual Dot (Visual only, no events)
+        dots += `<circle cx="${x}" cy="${y}" r="3" fill="#4ade80" opacity="0.9" style="pointer-events:none;" />`;
+    });
+
+    return `
+        <div class="sparkline-container" style="width:100%; height:${height}px; position: relative; background: rgba(255,255,255,0.03); border-radius: 4px; border: 1px solid rgba(255,255,255,0.05);">
+            <div style="position:absolute; top:2px; left:5px; font-size:10px; color:#4ade80; opacity:0.8;">Max: ${formatMoney(maxVal)}</div>
+            <div style="position:absolute; bottom:2px; left:5px; font-size:10px; color:#888; opacity:0.8;">Min: ${formatMoney(minVal)}</div>
+            
+            <svg width="100%" height="100%" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+                <path d="${d}" fill="none" stroke="#4ade80" stroke-width="2" />
+                ${dots}
+            </svg>
+        </div>
+    `;
+};
+
+// ==========================================
+// GLOBAL STATE
+// ==========================================
 const state = {
     masterData: {},
-    masterKeys: [], // Sorted list of names
-    filteredKeys: [], // Current search results
+    masterKeys: [],
+    filteredKeys: [],
     visibleCount: 50,
     batchSize: 50,
-    isLoading: false,
+    historyStats: [],
+    latestClassDate: "",
+    latestUnclassDate: "",
+    chartInstances: {}, 
     filters: {
         text: '',
-        type: 'all', // all, classified, unclassified
+        type: 'all',
         role: '',
         minSalary: null,
         maxSalary: null
     }
 };
 
-// DOM Elements
 const els = {
     searchInput: document.getElementById('search'),
     clearBtn: document.getElementById('clear-search'),
@@ -78,7 +150,6 @@ const els = {
     results: document.getElementById('results'),
     stats: document.getElementById('stats-bar'),
     roleDatalist: document.getElementById('role-list'),
-    // Dashboard Elements
     dashboard: document.getElementById('stats-dashboard'),
     statTotal: document.getElementById('stat-total'),
     statMedian: document.getElementById('stat-median'),
@@ -86,40 +157,60 @@ const els = {
     barUnclassified: document.getElementById('bar-unclassified'),
     countClassified: document.getElementById('count-classified'),
     countUnclassified: document.getElementById('count-unclassified'),
-    // New Chart Elements
     orgLeaderboard: document.getElementById('org-leaderboard'),
     tenureChart: document.getElementById('tenure-chart'),
     roleDonut: document.getElementById('role-donut'),
     roleLegend: document.getElementById('role-legend')
 };
 
-// Initialization
+// ==========================================
+// INITIALIZATION
+// ==========================================
 fetch('data.json')
     .then(res => res.json())
     .then(data => {
-        // Pre-compute search strings for performance
+        let maxClassDate = "";
+        let maxUnclassDate = "";
+
         Object.keys(data).forEach(key => {
             const p = data[key];
-            const lastSnap = p.Timeline[p.Timeline.length - 1];
-            const lastJob = (lastSnap && lastSnap.Jobs.length > 0) ? lastSnap.Jobs[0] : {};
-            const role = lastJob['Job Title'] || '';
-            const jobOrg = lastJob['Job Orgn'] || '';
+            if (p.Timeline && p.Timeline.length > 0) {
+                const lastSnap = p.Timeline[p.Timeline.length - 1];
+                const lastJob = (lastSnap.Jobs && lastSnap.Jobs.length > 0) ? lastSnap.Jobs[0] : {};
+                const role = lastJob['Job Title'] || '';
+                const jobOrg = lastJob['Job Orgn'] || '';
+                p._searchStr = (key + " " + JSON.stringify(p.Meta) + " " + role + " " + jobOrg).toLowerCase();
 
-            p._searchStr = (key + " " + JSON.stringify(p.Meta) + " " + role + " " + jobOrg).toLowerCase();
+                if (lastSnap.Date) {
+                    const src = (lastSnap.Source || "").toLowerCase();
+                    if (src.includes('unclass')) {
+                        if (lastSnap.Date > maxUnclassDate) maxUnclassDate = lastSnap.Date;
+                    } else {
+                        if (lastSnap.Date > maxClassDate) maxClassDate = lastSnap.Date;
+                    }
+                }
+            } else {
+                p._searchStr = key.toLowerCase();
+            }
         });
 
+        state.latestClassDate = maxClassDate;
+        state.latestUnclassDate = maxUnclassDate;
+        state.historyStats = processHistoricalData(data);
         state.masterData = data;
         state.masterKeys = Object.keys(data).sort();
 
         populateRoleOptions(data);
         renderSuggestedSearches();
-
-        // Check for deep link before first render
-        const targetName = parseUrlParams();
-
-        runSearch(); // Initial render
+        
+        const targetName = parseUrlParams(); 
+        runSearch();
         updateStats();
         setupInfiniteScroll();
+
+        setTimeout(() => {
+            renderInteractiveCharts(state.historyStats);
+        }, 0);
 
         if (targetName) {
             autoExpandTarget(targetName);
@@ -132,65 +223,155 @@ fetch('data.json')
         console.error(err);
     });
 
-function setupTooltips() {
-    const tooltipEl = document.getElementById('custom-tooltip');
-
-    document.addEventListener('mouseover', (e) => {
-        // Traverse up to find data-tooltip (in case of nested spans)
-        const target = e.target.closest('[data-tooltip]');
-        if (target) {
-            tooltipEl.textContent = target.getAttribute('data-tooltip');
-            tooltipEl.classList.remove('hidden');
-        }
-    });
-
-    document.addEventListener('mousemove', (e) => {
-        if (!tooltipEl.classList.contains('hidden')) {
-            // Add offset to avoid covering cursor
-            const x = e.clientX + 10;
-            const y = e.clientY + 10;
-
-            // Boundary check (basic)
-            const rightEdge = window.innerWidth - tooltipEl.offsetWidth - 20;
-            const bottomEdge = window.innerHeight - tooltipEl.offsetHeight - 20;
-
-            tooltipEl.style.left = `${Math.min(x, rightEdge)}px`;
-            tooltipEl.style.top = `${Math.min(y, bottomEdge)}px`;
-        }
-    });
-
-    document.addEventListener('mouseout', (e) => {
-        const target = e.target.closest('[data-tooltip]');
-        if (target) {
-            tooltipEl.classList.add('hidden');
-        }
-    });
-}
-
-function populateRoleOptions(data) {
-    const roles = new Set();
+// ==========================================
+// HISTORICAL DATA LOGIC
+// ==========================================
+function processHistoricalData(data) {
+    const statsMap = {};
     Object.values(data).forEach(person => {
+        if (!person.Timeline) return;
         person.Timeline.forEach(snap => {
-            snap.Jobs.forEach(job => {
-                if (job['Job Title']) roles.add(job['Job Title']);
-            });
+            const date = snap.Date;
+            if (!statsMap[date]) {
+                statsMap[date] = { date: date, classified: 0, unclassified: 0, payroll: 0 };
+            }
+            const src = (snap.Source || "").toLowerCase();
+            const pay = calculateSnapshotPay(snap);
+            statsMap[date].payroll += pay;
+            if (src.includes('unclass')) statsMap[date].unclassified++;
+            else statsMap[date].classified++;
         });
     });
-
-    const sortedRoles = Array.from(roles).sort();
-    els.roleDatalist.innerHTML = sortedRoles.map(r => `<option value="${r}">`).join('');
+    return Object.values(statsMap).sort((a, b) => new Date(a.date) - new Date(b.date));
 }
 
-function renderSuggestedSearches() {
-    if (!els.suggestedSearches) return;
+// ==========================================
+// INTERACTIVE CHARTS
+// ==========================================
+function renderInteractiveCharts(history) {
+    if (typeof Chart === 'undefined') return;
 
-    const suggestions = ['Professor', 'Athletics', 'Physics', 'Coach', 'Dean'];
-    els.suggestedSearches.innerHTML = suggestions.map(term =>
-        `<button class="chip" onclick="applySearch('${term}')">${term}</button>`
-    ).join('');
+    let container = document.getElementById('historical-charts-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'historical-charts-container';
+        
+        // This removes the container from the grid layout flow, allowing the children
+        // (the cards) to snap directly to the dashboard grid columns.
+        container.style.display = 'contents';
+        
+        els.dashboard.appendChild(container);
+    }
+
+    // Standard warning box HTML to be reused in both cards
+    const warningBox = `
+        <div style="background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.3); color: #facc15; padding: 10px; border-radius: 6px; font-size: 0.8rem; margin-bottom: 15px; display: flex; align-items: flex-start; gap: 8px; line-height: 1.4;">
+            <span style="font-size: 1.1rem; line-height: 1;">⚠️</span>
+            <span><strong>Data Incomplete:</strong> These historical charts are based on partial records. Gaps in data may skew trends and totals.</span>
+        </div>
+    `;
+
+    container.innerHTML = `
+        <div class="stat-card wide">
+            <div class="stat-label">Historical Personnel Count</div>
+            ${warningBox}
+            <div style="height: 300px; position: relative;">
+                <canvas id="chart-personnel"></canvas>
+            </div>
+        </div>
+        <div class="stat-card wide">
+            <div class="stat-label">Total Compensation Trend</div>
+            ${warningBox}
+             <div style="height: 300px; position: relative;">
+                <canvas id="chart-payroll"></canvas>
+            </div>
+        </div>
+    `;
+
+    const commonOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { labels: { color: '#ccc' } },
+            tooltip: { mode: 'index', intersect: false }
+        },
+        scales: {
+            x: { ticks: { color: '#888' }, grid: { color: '#333' } },
+            y: { ticks: { color: '#888' }, grid: { color: '#333' } }
+        }
+    };
+
+    new Chart(document.getElementById('chart-personnel').getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: history.map(d => d.date),
+            datasets: [
+                { label: 'Classified', data: history.map(d => d.classified), backgroundColor: '#8b5cf6', stack: 'Stack 0' },
+                { label: 'Unclassified', data: history.map(d => d.unclassified), backgroundColor: '#f97316', stack: 'Stack 0' }
+            ]
+        },
+        options: commonOptions
+    });
+
+    const calculateMovingAverage = (data, windowSize) => {
+        const ma = [];
+        for (let i = 0; i < data.length; i++) {
+            const start = Math.max(0, i - windowSize + 1);
+            const end = i + 1;
+            const subset = data.slice(start, end);
+            const avg = subset.reduce((sum, item) => sum + item.payroll, 0) / subset.length;
+            ma.push(avg);
+        }
+        return ma;
+    };
+    
+    const trendData = calculateMovingAverage(history, 3);
+
+    new Chart(document.getElementById('chart-payroll').getContext('2d'), {
+        type: 'line',
+        data: {
+            labels: history.map(d => d.date),
+            datasets: [
+                {
+                    label: 'Total Payroll',
+                    data: history.map(d => d.payroll),
+                    borderColor: '#22c55e',
+                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    order: 2
+                },
+                {
+                    label: '3-Year Moving Avg',
+                    data: trendData,
+                    borderColor: '#fbbf24',
+                    borderDash: [5, 5],
+                    fill: false,
+                    pointRadius: 0,
+                    borderWidth: 2,
+                    order: 1
+                }
+            ]
+        },
+        options: {
+            ...commonOptions,
+            scales: {
+                ...commonOptions.scales,
+                y: {
+                    ...commonOptions.scales.y,
+                    ticks: {
+                        color: '#888',
+                        callback: function(value) { return '$' + (value / 1000000).toFixed(1) + 'M'; }
+                    }
+                }
+            }
+        }
+    });
 }
 
-// Exposed globally so onclick works
+// ==========================================
+// SEARCH & FILTER LOGIC
+// ==========================================
 window.applySearch = function(term) {
     els.searchInput.value = term;
     state.filters.text = term;
@@ -198,7 +379,6 @@ window.applySearch = function(term) {
     runSearch();
 };
 
-// Search Logic
 function runSearch() {
     const term = state.filters.text.toLowerCase();
     const typeFilter = state.filters.type;
@@ -207,88 +387,72 @@ function runSearch() {
 
     state.filteredKeys = state.masterKeys.filter(name => {
         const person = state.masterData[name];
+        if (person._searchStr && !person._searchStr.includes(term)) return false;
 
-        // 1. Text Match (Name, Org)
-        // Optimization: Use pre-computed search string to avoid repeated JSON.stringify
-        if (!person._searchStr.includes(term)) return false;
-
-        // 2. Type Match (Classified / Unclassified)
         if (typeFilter !== 'all') {
             const lastSnap = person.Timeline[person.Timeline.length - 1];
             if (!lastSnap) return false;
-
-            const src = lastSnap.Source.toLowerCase();
+            const src = (lastSnap.Source || "").toLowerCase();
             const isUnclass = src.includes('unclass');
-
-            if (typeFilter === 'unclassified') {
-                if (!isUnclass) return false;
-            } else if (typeFilter === 'classified') {
-                if (!src.includes('class') || isUnclass) return false;
-            }
+            if (typeFilter === 'unclassified' && !isUnclass) return false;
+            if (typeFilter === 'classified' && (isUnclass || !src.includes('class'))) return false;
         }
 
-        // 3. Role Match
         if (roleFilter) {
             const hasRole = person.Timeline.some(snap =>
-                snap.Jobs.some(job => (job['Job Title'] || '').toLowerCase().includes(roleFilter))
+                snap.Jobs && snap.Jobs.some(job => (job['Job Title'] || '').toLowerCase().includes(roleFilter))
             );
             if (!hasRole) return false;
         }
 
-        // 4. Salary Range Match (Based on LATEST snapshot)
         if (minSalary !== null || maxSalary !== null) {
             const salary = getPersonTotalPay(person);
-
             if (minSalary !== null && salary < minSalary) return false;
             if (maxSalary !== null && salary > maxSalary) return false;
         }
-
         return true;
     });
 
-    state.visibleCount = state.batchSize; // Reset scroll
+    state.visibleCount = state.batchSize;
     renderInitial();
     updateStats();
-
-    // Update Dashboard Stats
-    const stats = calculateStats(state.filteredKeys);
-    updateDashboard(stats);
+    updateDashboard(calculateStats(state.filteredKeys));
 }
 
+// ==========================================
+// STATISTICS & DASHBOARD
+// ==========================================
 function calculateStats(keys) {
-    let classified = 0;
-    let unclassified = 0;
-    let salaries = [];
-    let orgs = {};
-    let roles = {};
+    let count = 0, classified = 0, unclassified = 0, salaries = [];
+    let orgs = {}, roles = {};
     let tenure = { t0_2: 0, t2_5: 0, t5_10: 0, t10_plus: 0 };
-
     const now = new Date();
 
     keys.forEach(key => {
         const p = state.masterData[key];
+        if (!p.Timeline || p.Timeline.length === 0) return;
         const lastSnap = p.Timeline[p.Timeline.length - 1];
-        const lastJob = lastSnap.Jobs[0] || {};
+        const src = (lastSnap.Source || "").toLowerCase();
+        const isUnclass = src.includes('unclass');
+        
+        const isLatest = isUnclass 
+            ? (!state.latestUnclassDate || lastSnap.Date === state.latestUnclassDate)
+            : (!state.latestClassDate || lastSnap.Date === state.latestClassDate);
+
+        if (!isLatest) return;
+        
+        count++; 
         const salary = getPersonTotalPay(p);
+        if (salary > 0) salaries.push(salary);
+        if (isUnclass) unclassified++; else classified++;
 
-        // Salary Stats
-        if (salary > 0) {
-            salaries.push(salary);
-        }
-
-        // Classification
-        const src = lastSnap.Source.toLowerCase();
-        if (src.includes('unclass')) unclassified++;
-        else classified++;
-
-        // Organizations & Roles
         const org = personOrg(p) || 'Unknown';
         orgs[org] = (orgs[org] || 0) + 1;
-
+        
+        const lastJob = (lastSnap.Jobs && lastSnap.Jobs.length > 0) ? lastSnap.Jobs[0] : {};
         const role = lastJob['Job Title'] || 'Unknown';
         roles[role] = (roles[role] || 0) + 1;
 
-        // Tenure
         const hiredStr = p.Meta['First Hired'];
         if (hiredStr) {
             const hiredDate = new Date(hiredStr);
@@ -302,7 +466,6 @@ function calculateStats(keys) {
         }
     });
 
-    // Median Salary
     salaries.sort((a, b) => a - b);
     let median = 0;
     if (salaries.length > 0) {
@@ -310,33 +473,15 @@ function calculateStats(keys) {
         median = salaries.length % 2 !== 0 ? salaries[mid] : (salaries[mid - 1] + salaries[mid]) / 2;
     }
 
-    // Top Orgs
-    const sortedOrgs = Object.entries(orgs)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5);
-
-    // Top Roles
-    const sortedRoles = Object.entries(roles)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 4); // Top 4
-
-    return {
-        count: keys.length,
-        medianSalary: median,
-        classified,
-        unclassified,
-        topOrgs: sortedOrgs,
-        topRoles: sortedRoles,
-        tenure
+    return { 
+        count, 
+        medianSalary: median, 
+        classified, 
+        unclassified, 
+        topOrgs: Object.entries(orgs).sort((a, b) => b[1] - a[1]).slice(0, 5), 
+        topRoles: Object.entries(roles).sort((a, b) => b[1] - a[1]).slice(0, 4), 
+        tenure 
     };
-}
-
-function personOrg(p) {
-    // Try Meta Home Orgn first, then job orgn
-    if (p.Meta['Home Orgn']) return p.Meta['Home Orgn'];
-    const lastSnap = p.Timeline[p.Timeline.length - 1];
-    if (lastSnap.Jobs[0]) return lastSnap.Jobs[0]['Job Orgn'];
-    return null;
 }
 
 function updateDashboard(stats) {
@@ -344,58 +489,35 @@ function updateDashboard(stats) {
     els.statTotal.textContent = stats.count.toLocaleString();
     els.statMedian.textContent = formatMoney(stats.medianSalary);
 
-    // Classification
     const totalTypes = stats.classified + stats.unclassified;
     const classPct = totalTypes ? (stats.classified / totalTypes) * 100 : 0;
     const unclassPct = totalTypes ? (stats.unclassified / totalTypes) * 100 : 0;
     els.barClassified.style.width = `${classPct}%`;
     els.barUnclassified.style.width = `${unclassPct}%`;
-    els.barClassified.setAttribute('data-tooltip', `Classified: ${stats.classified.toLocaleString()} (${Math.round(classPct)}%)`);
-    els.barUnclassified.setAttribute('data-tooltip', `Unclassified: ${stats.unclassified.toLocaleString()} (${Math.round(unclassPct)}%)`);
-    els.barClassified.removeAttribute('title');
-    els.barUnclassified.removeAttribute('title');
     els.countClassified.textContent = stats.classified.toLocaleString();
     els.countUnclassified.textContent = stats.unclassified.toLocaleString();
 
-    // Tenure Chart
     const tTotal = stats.tenure.t0_2 + stats.tenure.t2_5 + stats.tenure.t5_10 + stats.tenure.t10_plus || 1;
-    const tPcts = [
-        (stats.tenure.t0_2 / tTotal) * 100,
-        (stats.tenure.t2_5 / tTotal) * 100,
-        (stats.tenure.t5_10 / tTotal) * 100,
-        (stats.tenure.t10_plus / tTotal) * 100
-    ];
-
     els.tenureChart.innerHTML = `
-        <div class="tenure-seg t1" style="width:${tPcts[0]}%" data-tooltip="< 2 Years: ${stats.tenure.t0_2}"></div>
-        <div class="tenure-seg t2" style="width:${tPcts[1]}%" data-tooltip="2-5 Years: ${stats.tenure.t2_5}"></div>
-        <div class="tenure-seg t3" style="width:${tPcts[2]}%" data-tooltip="5-10 Years: ${stats.tenure.t5_10}"></div>
-        <div class="tenure-seg t4" style="width:${tPcts[3]}%" data-tooltip="10+ Years: ${stats.tenure.t10_plus}"></div>
+        <div class="tenure-seg t1" style="width:${(stats.tenure.t0_2 / tTotal) * 100}%" data-tooltip="< 2 Years: ${stats.tenure.t0_2}"></div>
+        <div class="tenure-seg t2" style="width:${(stats.tenure.t2_5 / tTotal) * 100}%" data-tooltip="2-5 Years: ${stats.tenure.t2_5}"></div>
+        <div class="tenure-seg t3" style="width:${(stats.tenure.t5_10 / tTotal) * 100}%" data-tooltip="5-10 Years: ${stats.tenure.t5_10}"></div>
+        <div class="tenure-seg t4" style="width:${(stats.tenure.t10_plus / tTotal) * 100}%" data-tooltip="10+ Years: ${stats.tenure.t10_plus}"></div>
     `;
 
-    // Leaderboard
     const maxCount = stats.topOrgs[0] ? stats.topOrgs[0][1] : 1;
     els.orgLeaderboard.innerHTML = stats.topOrgs.map(([name, count]) => `
-        <div class="lb-row">
-            <div class="lb-label" data-tooltip="${name}">${name}</div>
-            <div class="lb-bar-container">
-                <div class="lb-bar" style="width: ${(count/maxCount)*100}%"></div>
-                <div class="lb-val">${count}</div>
-            </div>
-        </div>
+        <div class="lb-row"><div class="lb-label" data-tooltip="${name}">${name}</div>
+        <div class="lb-bar-container"><div class="lb-bar" style="width: ${(count/maxCount)*100}%"></div><div class="lb-val">${count}</div></div></div>
     `).join('');
 
-    // Role Donut Chart
     updateDonut(stats.topRoles, stats.count);
 }
 
 function updateDonut(roles, total) {
     if (!roles.length) return;
-
     const colors = ['#D73F09', '#b83508', '#992c06', '#7a2205', '#444444'];
-    let currentDeg = 0;
-    let gradientParts = [];
-    let otherCount = total;
+    let currentDeg = 0, gradientParts = [], otherCount = total;
 
     roles.forEach(([role, count], idx) => {
         const deg = (count / total) * 360;
@@ -403,52 +525,60 @@ function updateDonut(roles, total) {
         currentDeg += deg;
         otherCount -= count;
     });
-
-    // Add "Other" segment
-    if (otherCount > 0) {
-        gradientParts.push(`${colors[4]} ${currentDeg}deg 360deg`);
-    }
+    if (otherCount > 0) gradientParts.push(`${colors[4]} ${currentDeg}deg 360deg`);
 
     els.roleDonut.style.background = `conic-gradient(${gradientParts.join(', ')})`;
-    els.roleDonut.setAttribute('data-tooltip', roles.map(([r, c]) => `${r}: ${c} (${Math.round(c/total*100)}%)`).join('\n'));
-    els.roleDonut.removeAttribute('title');
-
-    // Legend
     els.roleLegend.innerHTML = roles.map(([role, count], idx) => `
         <div class="legend-item"><span class="dot" style="background:${colors[idx]}"></span> ${role} (${Math.round(count/total*100)}%)</div>
     `).join('') + (otherCount > 0 ? `<div class="legend-item"><span class="dot" style="background:${colors[4]}"></span> Other (${Math.round(otherCount/total*100)}%)</div>` : '');
 }
 
+function personOrg(p) {
+    if (p.Meta['Home Orgn']) return p.Meta['Home Orgn'];
+    if (p.Timeline && p.Timeline.length > 0) {
+        const lastSnap = p.Timeline[p.Timeline.length - 1];
+        if (lastSnap.Jobs && lastSnap.Jobs.length > 0) return lastSnap.Jobs[0]['Job Orgn'];
+    }
+    return null;
+}
+
+// ==========================================
+// CARD GENERATION
+// ==========================================
 function generateCardHTML(name, idx) {
     const person = state.masterData[name];
+    if (!person.Timeline || person.Timeline.length === 0) return '';
+    
     const lastSnapshot = person.Timeline[person.Timeline.length - 1];
-    const lastJob = lastSnapshot.Jobs[0] || {};
-    // Use simple index-based ID to avoid issues with special characters in names (e.g. O'Connor)
+    const lastJob = (lastSnapshot.Jobs && lastSnapshot.Jobs.length > 0) ? lastSnapshot.Jobs[0] : {};
+    
     const cardId = `card-${idx}`;
     const historyId = `history-${idx}`;
-    const safeName = name.replace(/'/g, "\\'"); // For JS string
-    const attrName = name.replace(/"/g, '&quot;'); // For HTML attribute
-
+    const attrName = name.replace(/"/g, '&quot;');
     const totalPay = getPersonTotalPay(person);
-
     const reversedTimeline = person.Timeline.slice().reverse();
 
+    const src = (lastSnapshot.Source || "").toLowerCase();
+    const isUnclass = src.includes('unclass');
+    const isLatest = isUnclass 
+        ? (!state.latestUnclassDate || lastSnapshot.Date === state.latestUnclassDate)
+        : (!state.latestClassDate || lastSnapshot.Date === state.latestClassDate);
+    
+    const badgeHTML = !isLatest ? `<span class="badge" style="background:#ef4444; color:white; margin-left:10px;">FORMER / INACTIVE</span>` : '';
+    const reportHistoryHTML = person.Timeline.map(snap => `<span class="badge badge-source" style="margin-right:4px; margin-bottom:4px;">${snap.Date}</span>`).join('');
+
     return `
-    <div class="card" id="${cardId}" data-name="${attrName}">
+    <div class="card" id="${cardId}" data-name="${attrName}" style="${!isLatest ? 'opacity: 0.8;' : ''}">
         <div class="card-header" onclick="toggleCard('${cardId}')" onkeydown="handleCardKey(event, '${cardId}')" tabindex="0" role="button" aria-expanded="false" aria-controls="${historyId}">
             <div class="person-info">
                 <div class="name-header">
-                    <h2>${name}</h2>
-                    <button class="link-btn-card" data-linkname="${attrName}" onclick="copyLink(event, this.dataset.linkname)" aria-label="Copy link to ${attrName}" data-tooltip="Copy Link">
-                        🔗
-                    </button>
+                    <h2>${name} ${badgeHTML}</h2>
+                    <button class="link-btn-card" data-linkname="${attrName}" onclick="copyLink(event, this.dataset.linkname)" aria-label="Copy link">🔗</button>
                 </div>
                 <p>Home Org: ${person.Meta["Home Orgn"] || 'N/A'}</p>
             </div>
             <div class="latest-stat">
-                <div class="latest-salary" data-tooltip="Total calculated from all active appointments">
-                    ${formatMoney(totalPay)}
-                </div>
+                <div class="latest-salary" data-tooltip="Total calculated from all active appointments">${formatMoney(totalPay)}</div>
                 <div class="latest-role">${lastJob['Job Title'] || 'Unknown'}</div>
             </div>
         </div>
@@ -459,330 +589,150 @@ function generateCardHTML(name, idx) {
                 <strong>Adj Service:</strong> ${formatDate(person.Meta["Adj Service Date"])}
             </div>
             <table>
-                <thead>
-                    <tr>
-                        <th>Date & Source</th>
-                        <th>Job Details</th>
-                        <th><span class="help-cursor" data-tooltip="Job Classification Code">Type</span></th>
-                        <th><span class="help-cursor" data-tooltip="Annual Salary Rate (Base Pay)">Salary</span></th>
-                    </tr>
-                </thead>
+                <thead><tr><th>Date & Source</th><th>Job Details</th><th>Type</th><th>Salary</th></tr></thead>
                 <tbody>
                     ${reversedTimeline.map((snap, snapIdx) => {
-                        // Find previous snapshot (which is next in reversed array)
                         const prevSnap = reversedTimeline[snapIdx + 1];
-
-                        return snap.Jobs.map(job => {
+                        return (snap.Jobs || []).map(job => {
                             let diffHTML = '';
-                            if (prevSnap) {
+                            if (prevSnap && prevSnap.Jobs) {
                                 const prevJob = prevSnap.Jobs.find(j => j['Posn-Suff'] === job['Posn-Suff']);
                                 if (prevJob) {
-                                    const currRate = cleanMoney(job['Annual Salary Rate']);
-                                    const prevRate = cleanMoney(prevJob['Annual Salary Rate']);
-                                    const diff = currRate - prevRate;
-
+                                    const currRate = cleanMoney(job['Annual Salary Rate']), prevRate = cleanMoney(prevJob['Annual Salary Rate']), diff = currRate - prevRate;
                                     if (diff !== 0 && prevRate > 0) {
                                         const pct = (diff / prevRate) * 100;
-                                        const sign = diff > 0 ? '+' : '';
-                                        const colorClass = diff > 0 ? 'diff-positive' : 'diff-negative';
-                                        diffHTML = `<span class="diff-val ${colorClass}">${sign}${formatMoney(diff)} (${sign}${pct.toFixed(1)}%)</span>`;
+                                        diffHTML = `<span class="diff-val ${diff > 0 ? 'diff-positive' : 'diff-negative'}">${diff > 0 ? '+' : ''}${formatMoney(diff)} (${diff > 0 ? '+' : ''}${pct.toFixed(1)}%)</span>`;
                                     }
                                 }
                             }
-
-                            return `
-                            <tr>
-                                <td class="date-cell">
-                                    <div>${formatDate(snap.Date)}</div>
-                                    <div class="badge badge-source">${snap.Source.replace('.txt','').substring(0, 15)}...</div>
-                                </td>
-                                <td>
-                                    <div style="font-weight:600;">${job['Job Title'] || ''}</div>
-                                    <div style="font-size:0.85rem; color:#64748b;">${job['Job Orgn'] || ''}</div>
-                                    <div class="job-meta-grid" style="font-size: 0.8rem; color: #475569; margin-top: 4px; line-height: 1.4;">
-                                        ${job['Rank'] && job['Rank'] !== 'No Rank' ? `<div><span class="help-cursor" data-tooltip="Academic or Administrative Rank">Rank: ${job['Rank']}</span> (Eff: ${formatDate(job['Rank Effective Date'])})</div>` : ''}
-                                        <div>
-                                            <span class="help-cursor" data-tooltip="Position Number - Suffix">Pos: ${job['Posn-Suff'] || 'N/A'}</span>
-                                            ${job['Appt Percent'] ? `| <span class="help-cursor" data-tooltip="Appointment Percent (FTE)">Appt: ${job['Appt Percent']}%</span>` : ''}
-                                        </div>
-                                        <div>
-                                            Dates: ${formatDate(job['Appt Begin Date'])} - ${job['Appt End Date'] ? formatDate(job['Appt End Date']) : 'Present'}
-                                        </div>
-                                    </div>
-                                </td>
-                                <td>
-                                    <span class="badge badge-type" data-tooltip="Job Type Code">${job['Job Type'] || '?'}</span>
-                                </td>
-                                <td class="money-cell">
-                                    ${formatMoney(job['Annual Salary Rate'])}
-                                    ${job['Salary Term'] ? `<span class="term-badge">${job['Salary Term']}</span>` : ''}
-                                    ${diffHTML}
-                                </td>
-                            </tr>
-                        `}).join('')
+                            return `<tr><td class="date-cell"><div>${formatDate(snap.Date)}</div><div class="badge badge-source">${(snap.Source || '').substring(0, 15)}...</div></td>
+                                <td><div style="font-weight:600;">${job['Job Title'] || ''}</div><div style="font-size:0.85rem; color:#64748b;">${job['Job Orgn'] || ''}</div></td>
+                                <td><span class="badge badge-type">${job['Job Type'] || '?'}</span></td>
+                                <td class="money-cell">${formatMoney(job['Annual Salary Rate'])}${diffHTML}</td></tr>`;
+                        }).join('')
                     }).join('')}
                 </tbody>
             </table>
+            
+            <div class="personal-trend-section" style="margin-top: 20px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 8px;">
+                <div class="stat-label" style="font-size: 0.75rem; margin-bottom: 10px;">Individual Salary Trend</div>
+                ${generateSparkline(person.Timeline)}
+            </div>
+
+            <div style="margin-top: 15px; border-top: 1px solid #444; padding-top: 10px;">
+                <div style="font-size: 0.8rem; color: #888; margin-bottom: 5px;">Record appearances:</div>
+                <div style="display: flex; flex-wrap: wrap;">${reportHistoryHTML}</div>
+            </div>
         </div>
-    </div>
-    `;
+    </div>`;
 }
 
+// ==========================================
+// RENDERING & HELPERS
+// ==========================================
 function renderInitial() {
-    const { filteredKeys, visibleCount } = state;
-    const keysToRender = filteredKeys.slice(0, visibleCount);
-
-    if (keysToRender.length === 0) {
-        els.results.innerHTML = `<p style="text-align:center; color:#888;">No matching records found.</p>`;
-        return;
-    }
-
-    const html = keysToRender.map((name, idx) => generateCardHTML(name, idx)).join('');
-
-    // Sentinel
-    const sentinelHTML = `<div id="scroll-sentinel" class="loader-sentinel">${visibleCount < filteredKeys.length ? 'Loading more...' : 'End of results'}</div>`;
-
-    els.results.innerHTML = html + sentinelHTML;
+    const keys = state.filteredKeys.slice(0, state.visibleCount);
+    if (keys.length === 0) { els.results.innerHTML = `<p style="text-align:center; color:#888;">No matching records found.</p>`; return; }
+    els.results.innerHTML = keys.map((name, idx) => generateCardHTML(name, idx)).join('') + getSentinel();
     observeSentinel();
 }
 
 function appendNextBatch() {
-    const { filteredKeys, visibleCount, batchSize } = state;
-    // Calculate range
-    const startIdx = visibleCount; // Current count is where we start
-    const endIdx = Math.min(startIdx + batchSize, filteredKeys.length);
-
-    if (startIdx >= filteredKeys.length) return;
-
-    const keysToRender = filteredKeys.slice(startIdx, endIdx);
-    const html = keysToRender.map((name, idx) => generateCardHTML(name, startIdx + idx)).join('');
-
-    // Remove old sentinel
-    const oldSentinel = document.getElementById('scroll-sentinel');
-    if (oldSentinel) oldSentinel.remove();
-
-    // Create a temp container to convert string to nodes
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = html;
-
-    // Append new cards
-    while (tempDiv.firstChild) {
-        els.results.appendChild(tempDiv.firstChild);
-    }
-
-    // Update state
+    const startIdx = state.visibleCount;
+    const endIdx = Math.min(startIdx + state.batchSize, state.filteredKeys.length);
+    if (startIdx >= state.filteredKeys.length) return;
+    const html = state.filteredKeys.slice(startIdx, endIdx).map((name, idx) => generateCardHTML(name, startIdx + idx)).join('');
+    document.getElementById('scroll-sentinel')?.remove();
+    els.results.insertAdjacentHTML('beforeend', html + getSentinel());
     state.visibleCount = endIdx;
-
-    // Add new sentinel
-    const sentinelHTML = `<div id="scroll-sentinel" class="loader-sentinel">${state.visibleCount < filteredKeys.length ? 'Loading more...' : 'End of results'}</div>`;
-    els.results.insertAdjacentHTML('beforeend', sentinelHTML);
-
     observeSentinel();
 }
 
-function updateStats() {
-    els.stats.innerHTML = `Found ${state.filteredKeys.length} matching personnel records.`;
-}
+const getSentinel = () => `<div id="scroll-sentinel" class="loader-sentinel">${state.visibleCount < state.filteredKeys.length ? 'Loading more...' : 'End of results'}</div>`;
+function updateStats() { els.stats.innerHTML = `Found ${state.filteredKeys.length} matching personnel records.`; }
+function toggleCard(id) { const el = document.getElementById(id); if(el) { el.classList.toggle('expanded'); el.querySelector('.card-header')?.setAttribute('aria-expanded', el.classList.contains('expanded')); } }
+window.handleCardKey = function(e, id) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCard(id); } };
 
-function toggleCard(id) {
-    const el = document.getElementById(id);
-    if(el) {
-        el.classList.toggle('expanded');
-        const header = el.querySelector('.card-header');
-        if (header) {
-            header.setAttribute('aria-expanded', el.classList.contains('expanded'));
-        }
-    }
-}
-
-window.handleCardKey = function(e, id) {
-    if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        toggleCard(id);
-    }
-};
-
-// Infinite Scroll Observer
 let observer;
 function setupInfiniteScroll() {
-    const options = { root: null, rootMargin: '100px', threshold: 0.1 };
     observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting && state.visibleCount < state.filteredKeys.length) {
-                appendNextBatch();
-            }
-        });
-    }, options);
+        entries.forEach(entry => { if (entry.isIntersecting && state.visibleCount < state.filteredKeys.length) appendNextBatch(); });
+    }, { root: null, rootMargin: '100px', threshold: 0.1 });
+}
+function observeSentinel() { const s = document.getElementById('scroll-sentinel'); if (s && observer) observer.observe(s); }
+
+function debounce(func, wait) { let timeout; return function(...args) { clearTimeout(timeout); timeout = setTimeout(() => func.apply(this, args), wait); }; }
+const handleSearch = debounce(() => { state.filters.text = els.searchInput.value; runSearch(); }, 300);
+
+els.searchInput.addEventListener('input', (e) => { els.clearBtn.classList.toggle('hidden', !e.target.value); handleSearch(); });
+els.clearBtn.addEventListener('click', () => { els.searchInput.value = ''; els.clearBtn.classList.add('hidden'); state.filters.text = ''; runSearch(); els.searchInput.focus(); });
+els.typeSelect.addEventListener('change', (e) => { state.filters.type = e.target.value; runSearch(); });
+els.roleInput.addEventListener('input', debounce((e) => { state.filters.role = e.target.value; runSearch(); }, 300));
+els.salaryMin.addEventListener('input', debounce((e) => { state.filters.minSalary = parseFloat(e.target.value) || null; runSearch(); }, 300));
+els.salaryMax.addEventListener('input', debounce((e) => { state.filters.maxSalary = parseFloat(e.target.value) || null; runSearch(); }, 300));
+
+function setupTooltips() {
+    const tooltipEl = document.getElementById('custom-tooltip');
+    document.addEventListener('mouseover', (e) => {
+        const target = e.target.closest('[data-tooltip]');
+        if (target) { tooltipEl.textContent = target.getAttribute('data-tooltip'); tooltipEl.classList.remove('hidden'); }
+    });
+    document.addEventListener('mousemove', (e) => {
+        if (!tooltipEl.classList.contains('hidden')) {
+            tooltipEl.style.left = `${Math.min(e.clientX + 10, window.innerWidth - tooltipEl.offsetWidth - 20)}px`;
+            tooltipEl.style.top = `${Math.min(e.clientY + 10, window.innerHeight - tooltipEl.offsetHeight - 20)}px`;
+        }
+    });
+    document.addEventListener('mouseout', (e) => { if (e.target.closest('[data-tooltip]')) tooltipEl.classList.add('hidden'); });
 }
 
-function observeSentinel() {
-    const sentinel = document.getElementById('scroll-sentinel');
-    if (sentinel && observer) observer.observe(sentinel);
-}
-
-// Event Listeners
-// Debounce Function
-function debounce(func, wait) {
-    let timeout;
-    return function(...args) {
-        const context = this;
-        clearTimeout(timeout);
-        timeout = setTimeout(() => func.apply(context, args), wait);
-    };
-}
-
-// Search Inputs
-const handleSearch = debounce(() => {
-    state.filters.text = els.searchInput.value;
-    runSearch();
-}, 300);
-
-els.searchInput.addEventListener('input', (e) => {
-    const val = e.target.value;
-    if (val) els.clearBtn.classList.remove('hidden');
-    else els.clearBtn.classList.add('hidden');
-    handleSearch();
-});
-
-els.clearBtn.addEventListener('click', () => {
-    els.searchInput.value = '';
-    els.clearBtn.classList.add('hidden');
-    state.filters.text = '';
-    runSearch();
-    els.searchInput.focus();
-});
-
-els.typeSelect.addEventListener('change', (e) => {
-    state.filters.type = e.target.value;
-    runSearch();
-});
-
-els.roleInput.addEventListener('input', debounce((e) => {
-    state.filters.role = e.target.value;
-    runSearch();
-}, 300));
-
-els.salaryMin.addEventListener('input', debounce((e) => {
-    state.filters.minSalary = e.target.value ? parseFloat(e.target.value) : null;
-    runSearch();
-}, 300));
-
-els.salaryMax.addEventListener('input', debounce((e) => {
-    state.filters.maxSalary = e.target.value ? parseFloat(e.target.value) : null;
-    runSearch();
-}, 300));
-
-// Modal Logic
 document.addEventListener('DOMContentLoaded', () => {
     const modal = document.getElementById('info-modal');
-    const infoBtn = document.getElementById('info-btn');
-    const closeBtn = document.getElementById('close-modal');
-
-    if (infoBtn && modal && closeBtn) {
-        infoBtn.addEventListener('click', () => {
-            modal.classList.remove('hidden');
-            closeBtn.focus();
-        });
-
-        closeBtn.addEventListener('click', () => {
-            modal.classList.add('hidden');
-            infoBtn.focus();
-        });
-
-        window.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.classList.add('hidden');
-            }
-        });
-
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
-                modal.classList.add('hidden');
-                infoBtn.focus();
-            }
-        });
-
-        // Collapsible Sections in Modal
-        const collapseBtns = modal.querySelectorAll('.collapsible-btn');
-        collapseBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const isExpanded = btn.getAttribute('aria-expanded') === 'true';
-                btn.setAttribute('aria-expanded', !isExpanded);
-
-                // Toggle content visibility
-                const content = btn.nextElementSibling;
-                if (content && content.classList.contains('collapsible-content')) {
-                    content.classList.toggle('hidden');
-                }
-            });
-        });
+    if (modal) {
+        document.getElementById('info-btn').addEventListener('click', () => modal.classList.remove('hidden'));
+        document.getElementById('close-modal').addEventListener('click', () => modal.classList.add('hidden'));
+        window.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') modal.classList.add('hidden'); });
+        document.querySelectorAll('.collapsible-btn').forEach(btn => btn.addEventListener('click', () => {
+            btn.setAttribute('aria-expanded', !(btn.getAttribute('aria-expanded') === 'true'));
+            btn.nextElementSibling.classList.toggle('hidden');
+        }));
     }
 });
 
-// Ctrl+F Trap
-document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-        e.preventDefault();
-        els.searchInput.focus();
-    }
-});
-
-// Deep Linking & Sharing
 function parseUrlParams() {
-    const params = new URLSearchParams(window.location.search);
-    const name = params.get('name');
-    if (name) {
-        state.filters.text = name;
-        els.searchInput.value = name;
-        els.clearBtn.classList.remove('hidden');
-        return name;
-    }
+    const name = new URLSearchParams(window.location.search).get('name');
+    if (name) { state.filters.text = name; els.searchInput.value = name; els.clearBtn.classList.remove('hidden'); return name; }
     return null;
 }
-
 function autoExpandTarget(name) {
-    // Find the card with data-name matching the target
-    // Note: escape double quotes for the selector
-    const selector = `.card[data-name="${name.replace(/"/g, '\\"')}"]`;
-    const card = document.querySelector(selector);
-    if (card) {
-        card.classList.add('expanded');
-        setTimeout(() => {
-            card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }, 100);
-    }
+    const card = document.querySelector(`.card[data-name="${name.replace(/"/g, '\\"')}"]`);
+    if (card) { card.classList.add('expanded'); setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100); }
 }
-
 function copyLink(e, name) {
-    e.stopPropagation(); // Prevent card expansion
-
-    const url = new URL(window.location.href);
-    url.searchParams.set('name', name);
-
-    // Update browser history without reload
+    e.stopPropagation();
+    const url = new URL(window.location.href); url.searchParams.set('name', name);
     window.history.pushState({ path: url.href }, '', url.href);
-
-    navigator.clipboard.writeText(url.href).then(() => {
-        showToast(`Link copied for ${name}`);
-    }).catch(err => {
-        console.error('Failed to copy link', err);
-        showToast('Failed to copy link');
-    });
+    navigator.clipboard.writeText(url.href).then(() => showToast(`Link copied for ${name}`)).catch(console.error);
+}
+function showToast(msg) {
+    let t = document.getElementById('toast-notification');
+    if (!t) { t = document.createElement('div'); t.id = 'toast-notification'; t.className = 'toast'; document.body.appendChild(t); }
+    t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000);
 }
 
-function showToast(msg) {
-    let toast = document.getElementById('toast-notification');
-    if (!toast) {
-        toast = document.createElement('div');
-        toast.id = 'toast-notification';
-        toast.className = 'toast';
-        document.body.appendChild(toast);
-    }
-
-    toast.textContent = msg;
-    toast.classList.add('show');
-
-    setTimeout(() => {
-        toast.classList.remove('show');
-    }, 3000);
+function populateRoleOptions(data) {
+    const roles = new Set();
+    Object.values(data).forEach(person => {
+        if (person.Timeline) person.Timeline.forEach(snap => {
+            if (snap.Jobs) snap.Jobs.forEach(job => { if (job['Job Title']) roles.add(job['Job Title']); });
+        });
+    });
+    els.roleDatalist.innerHTML = Array.from(roles).sort().map(r => `<option value="${r}">`).join('');
+}
+function renderSuggestedSearches() {
+    if (!els.suggestedSearches) return;
+    els.suggestedSearches.innerHTML = ['Professor', 'Athletics', 'Physics', 'Coach', 'Dean'].map(term =>
+        `<button class="chip" onclick="applySearch('${term}')">${term}</button>`
+    ).join('');
 }
