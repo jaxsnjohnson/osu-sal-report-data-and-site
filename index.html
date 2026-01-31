@@ -7,14 +7,12 @@
     <meta name="keywords" content="OSU, Oregon State University, salary, transparency, personnel, history, data visualization">
     <title>OSU Salary Explorer</title>
 
-    <!-- Social Media / Open Graph -->
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://osu.oregonhigheredsalaries.org">
     <meta property="og:title" content="OSU Salary Explorer">
     <meta property="og:description" content="Interactive explorer for Oregon State University personnel salary data, classification stats, and history.">
     <meta property="og:image" content="https://osu.oregonhigheredsalaries.org/icons/logo.webp">
 
-    <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="OSU Salary Explorer">
     <meta name="twitter:description" content="Interactive explorer for Oregon State University personnel salary data, classification stats, and history.">
@@ -23,21 +21,70 @@
     <link rel="canonical" href="https://osu.oregonhigheredsalaries.org">
     <link rel="stylesheet" href="css/styles.css">
     <link rel="icon" type="image/x-icon" href="https://osu.oregonhigheredsalaries.org/icons/favicon.ico">
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        .foia-banner {
+            background: rgba(234, 179, 8, 0.1);
+            border: 1px solid rgba(234, 179, 8, 0.4);
+            color: #eab308; /* Amber color for warning feel */
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 10px;
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+        .foia-banner a {
+            color: #facc15;
+            font-weight: 600;
+            text-decoration: underline;
+        }
+        .foia-banner a:hover {
+            color: #fde047;
+        }
+        .close-banner {
+            background: none;
+            border: none;
+            color: #eab308;
+            font-size: 1.25rem;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+            opacity: 0.8;
+            margin-left: 10px;
+        }
+        .close-banner:hover {
+            opacity: 1;
+        }
+    </style>
 </head>
 <body>
 
 <div class="container">
+    
+    <div id="foia-notice" class="foia-banner">
+        <div class="foia-content">
+            <strong>⚠️ Data Record Update:</strong> We currently have the most recent dataset available from OSU's website. 
+            A FOIA request has been sent to OSU to help complete our record. 
+            <a href="/foia/initial_foia_request.html" target="_blank">View a digital copy of the FOIA request here</a>.
+        </div>
+        <button class="close-banner" onclick="document.getElementById('foia-notice').remove()" aria-label="Dismiss notification">&times;</button>
+    </div>
+
     <div class="header">
         <div class="title-row">
             <h1>OSU Salary Transparency</h1>
             <button type="button" id="info-btn" class="icon-btn" aria-label="About this project">?</button>
         </div>
 
-        <!-- Stats Dashboard -->
         <div id="stats-dashboard" class="dashboard hidden">
-            <!-- Row 1: Key Metrics -->
             <div class="stat-card">
-                <div class="stat-label help-cursor" data-tooltip="Total number of records in the current view">Total Personnel</div>
+                <div class="stat-label help-cursor" data-tooltip="Total number of records in the current view">Total Current Personnel</div>
                 <div class="stat-value" id="stat-total">-</div>
             </div>
             <div class="stat-card">
@@ -58,13 +105,11 @@
                 </div>
             </div>
 
-            <!-- Row 2: Deep Dives -->
             <div class="stat-column wide">
                 <div class="stat-card">
                     <div class="stat-label help-cursor" data-tooltip="Calculated based on the 'First Hired' date">Years of Service</div>
                     <div class="tenure-chart" id="tenure-chart">
-                        <!-- Injected via JS -->
-                    </div>
+                        </div>
                     <div class="bar-legend">
                         <span class="legend-item"><span class="dot" style="background:#4ade80"></span> < 2y</span>
                         <span class="legend-item"><span class="dot" style="background:#22c55e"></span> 2-5y</span>
@@ -85,8 +130,7 @@
             <div class="stat-card wide full-width-mobile">
                 <div class="stat-label help-cursor" data-tooltip="Organizations (Depts) with the highest personnel count">Top Organizations</div>
                 <div id="org-leaderboard" class="leaderboard">
-                    <!-- Injected via JS -->
-                </div>
+                    </div>
             </div>
         </div>
 
@@ -121,8 +165,6 @@
 
 <script src="js/app.js"></script>
 
-<!-- About Modal -->
-<!-- Custom Tooltip -->
 <div id="custom-tooltip" class="custom-tooltip hidden"></div>
 
 <div id="info-modal" class="modal hidden">

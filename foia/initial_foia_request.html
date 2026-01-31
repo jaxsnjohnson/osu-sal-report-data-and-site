@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FOIA Request - Staffing Data</title>
+    <style>
+        /* Variables mirrored from styles.css */
+        :root {
+            --primary: #D73F09; /* OSU Orange */
+            --bg-body: #1a1a1a;
+            --bg-card: #2c2c2c;
+            --bg-header: #222222;
+            --text-main: #f1f1f1;
+            --text-muted: #a0a0a0;
+            --border: #444444;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 14px;
+            color: var(--text-main);
+            background-color: var(--bg-body);
+            margin: 0;
+            padding: 40px;
+        }
+
+        .email-container {
+            background-color: var(--bg-card);
+            max-width: 800px;
+            margin: 0 auto;
+            border: 1px solid var(--border);
+            border-radius: 12px; /* Matching card border-radius */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        /* Email Header Styling */
+        .email-header {
+            background-color: var(--bg-header);
+            border-bottom: 1px solid var(--border);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .header-row {
+            display: flex;
+            align-items: baseline;
+        }
+
+        .header-label {
+            font-weight: 600;
+            color: var(--text-muted);
+            width: 70px;
+            flex-shrink: 0;
+            text-align: right;
+            margin-right: 15px;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .header-value {
+            color: var(--text-main);
+            font-family: monospace, sans-serif; /* Slight tech feel for data */
+        }
+        
+        /* Highlight the subject line */
+        .header-value strong {
+            color: var(--primary);
+        }
+
+        /* Email Body Styling */
+        .email-body {
+            padding: 40px;
+            line-height: 1.6;
+            font-family: "Segoe UI", Roboto, sans-serif;
+            font-size: 1rem;
+            color: var(--text-main);
+        }
+
+        /* Letter formatting inside email */
+        .letter-header-block {
+            margin-bottom: 30px;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            border-left: 2px solid var(--border);
+            padding-left: 15px;
+        }
+
+        .recipient-block {
+            margin-bottom: 25px;
+            color: var(--text-main);
+        }
+
+        p {
+            margin-bottom: 16px;
+            margin-top: 0;
+        }
+
+        h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+            margin-top: 25px;
+            color: var(--primary); /* OSU Orange Headers */
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 4px;
+            display: inline-block;
+        }
+
+        /* Redaction Styling */
+        .redacted {
+            background-color: #000; /* Pure black stands out on dark grey */
+            color: #000;
+            padding: 0 4px;
+            border-radius: 2px;
+            cursor: help;
+            user-select: none;
+            text-shadow: none;
+            border: 1px solid #333;
+        }
+        
+        .redacted::selection {
+            background: #000;
+            color: #000;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="email-container">
+        <div class="email-header">
+            <div class="header-row">
+                <div class="header-label">From:</div>
+                <div class="header-value">Johnson, Jax S &lt;jax.johnson@oregonstate.edu&gt;</div>
+            </div>
+            <div class="header-row">
+                <div class="header-label">Date:</div>
+                <div class="header-value">Fri 2026-01-30 4:08 PM</div>
+            </div>
+            <div class="header-row">
+                <div class="header-label">To:</div>
+                <div class="header-value">Public Records, OSU &lt;PublicRecords@oregonstate.edu&gt;</div>,
+            </div>
+            <div class="header-row">
+                <div class="header-label"></div>
+                <div class="header-value">Harrison, Janet &lt;janet.harrison@oregonstate.edu&gt;</div> 
+            </div>
+            <div class="header-row">
+                <div class="header-label">Subject:</div>
+                <div class="header-value"><strong>Public Records Request - Classified and Unclassified Staffing Data</strong></div>
+            </div>
+        </div>
+
+        <div class="email-body">
+            <div class="letter-header-block">
+                Jax SN Johnson<br>
+                <span class="redacted" title="redacted for private citizen">████ ██ ███████ ████</span><br>
+                <span class="redacted" title="redacted for private citizen">█████████, ██, █████</span><br>
+                (541) 602-2577<br>
+                2026-01-30
+            </div>
+
+            <div class="recipient-block">
+                Janet Harrison<br>
+                Public Records Officer<br>
+                University Relations and Marketing<br>
+                Oregon State University<br>
+                416M Kerr Administration Bldg<br>
+                Corvallis, Oregon 97331
+            </div>
+
+            <p>Dear Public Records Officer:</p>
+            
+            <p>Under the Oregon Public Records Law, §192.311 et seq., I am requesting an opportunity to inspect or obtain copies of public records regarding employment data for Oregon State University.</p>
+
+            <h3>Records Requested</h3>
+            <p>I am requesting a current list of all Classified employees and Unclassified employees currently employed by the University, and the quarterly reports issued on the university website for the last 13 years. This data can be provided in the same format as the quarterly salary reports. This data should be provided digitally, no trees should be directly harmed for the creation of this report. This data, for older reports, should have who generated/authored them cited in a separate file.</p>
+
+            <h3>Fee Waiver Request</h3>
+            <p>If there are any fees for searching or copying these records, please inform me if the cost will exceed $5.00.</p>
+            
+            <p>However, I would also like to request a waiver of all fees in that the disclosure of the requested information is in the public interest and will contribute significantly to the public’s understanding of the allocation of public resources for university staffing.</p>
+            
+            <p>Specifically, this information will shed light on the distribution of the workforce between classified and unclassified positions and the use of state funds for public employment. This information is not being sought for commercial purposes.</p>
+            
+            <p>I request a prompt response to this inquiry. If you expect a significant delay in responding to or in fulfilling this request, please contact me with information about when I might expect copies or the ability to inspect the requested records.</p>
+            
+            <p>If you deny any or all of this request, please cite each specific exemption you feel justifies the refusal to release the information and notify me of the appeal procedures available to me under the law.</p>
+            
+            <p>Thank you for considering my request.</p>
+            
+            <p>Sincerely,</p>
+            
+            <p>Jax</p>
+        </div>
+    </div>
+
+</body>
+</html>

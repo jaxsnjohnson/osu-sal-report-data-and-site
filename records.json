@@ -1,36 +1,266 @@
 [
   {
-    "filename": "2024-02-15-unclassified.pdf",
-    "title": "Unclassified Personnel - Febuary 2024",
-    "date": "2025-12-15",
+    "filename": "2014-10-20-unclassified.pdf",
+    "title": "Unclassified Personnel - October 2014",
+    "date": "2014-10-20",
+    "type": "Unclassified",
+    "year": 2014,
+    "quarter": "Q4",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2015-01-09-classified.pdf",
+    "title": "Classified Personnel - January 2015",
+    "date": "2015-01-09",
+    "type": "Classified",
+    "year": 2015,
+    "quarter": "Q1",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2015-01-09-unclassified.pdf",
+    "title": "Unclassified Personnel - January 2015",
+    "date": "2015-01-09",
+    "type": "Unclassified",
+    "year": 2015,
+    "quarter": "Q1",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2015-04-14-classified.pdf",
+    "title": "Classified Personnel - April 2015",
+    "date": "2015-04-14",
+    "type": "Classified",
+    "year": 2015,
+    "quarter": "Q2",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2016-10-14-classified.pdf",
+    "title": "Classified Personnel - October 2016",
+    "date": "2016-10-14",
     "type": "Classified",
     "year": 2016,
+    "quarter": "Q4",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2016-10-14-unclassified.pdf",
+    "title": "Unclassified Personnel - October 2016",
+    "date": "2016-10-14",
+    "type": "Unclassified",
+    "year": 2016,
+    "quarter": "Q4",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2017-07-13-classified.pdf",
+    "title": "Classified Personnel - July 2017",
+    "date": "2017-07-13",
+    "type": "Classified",
+    "year": 2017,
+    "quarter": "Q3",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2018-07-16-classified.pdf",
+    "title": "Classified Personnel - July 2018",
+    "date": "2018-07-16",
+    "type": "Classified",
+    "year": 2018,
+    "quarter": "Q3",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2019-07-18-unclassified.pdf",
+    "title": "Unclassified Personnel - July 2019",
+    "date": "2019-07-18",
+    "type": "Unclassified",
+    "year": 2019,
+    "quarter": "Q3",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2020-02-12-unclassified.pdf",
+    "title": "Unclassified Personnel - February 2020",
+    "date": "2020-02-12",
+    "type": "Unclassified",
+    "year": 2020,
     "quarter": "Q1",
-    "author": "Tracey Yee (OSU)",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2020-04-11-unclassified.pdf",
+    "title": "Unclassified Personnel - April 2020",
+    "date": "2020-04-11",
+    "type": "Unclassified",
+    "year": 2020,
+    "quarter": "Q2",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2020-07-14-classified.pdf",
+    "title": "Classified Personnel - July 2020",
+    "date": "2020-07-14",
+    "type": "Classified",
+    "year": 2020,
+    "quarter": "Q3",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2020-10-24-unclassified.pdf",
+    "title": "Unclassified Personnel - October 2020",
+    "date": "2020-10-24",
+    "type": "Unclassified",
+    "year": 2020,
+    "quarter": "Q4",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2021-02-09-classified.pdf",
+    "title": "Classified Personnel - February 2021",
+    "date": "2021-02-09",
+    "type": "Classified",
+    "year": 2021,
+    "quarter": "Q1",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2021-02-09-unclassified.pdf",
+    "title": "Unclassified Personnel - February 2021",
+    "date": "2021-02-09",
+    "type": "Unclassified",
+    "year": 2021,
+    "quarter": "Q1",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2021-04-21-unclassified.pdf",
+    "title": "Unclassified Personnel - April 2021",
+    "date": "2021-04-21",
+    "type": "Unclassified",
+    "year": 2021,
+    "quarter": "Q2",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2021-10-18-unclassified.pdf",
+    "title": "Unclassified Personnel - October 2021",
+    "date": "2021-10-18",
+    "type": "Unclassified",
+    "year": 2021,
+    "quarter": "Q4",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2022-04-18-classified.pdf",
+    "title": "Classified Personnel - April 2022",
+    "date": "2022-04-18",
+    "type": "Classified",
+    "year": 2022,
+    "quarter": "Q2",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2022-10-17-unclassified.pdf",
+    "title": "Unclassified Personnel - October 2022",
+    "date": "2022-10-17",
+    "type": "Unclassified",
+    "year": 2022,
+    "quarter": "Q4",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2023-01-17-classified.pdf",
+    "title": "Classified Personnel - January 2023",
+    "date": "2023-01-17",
+    "type": "Classified",
+    "year": 2023,
+    "quarter": "Q1",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2023-01-17-unclassified.pdf",
+    "title": "Unclassified Personnel - January 2023",
+    "date": "2023-01-17",
+    "type": "Unclassified",
+    "year": 2023,
+    "quarter": "Q1",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2023-04-21-classified.pdf",
+    "title": "Classified Personnel - April 2023",
+    "date": "2023-04-21",
+    "type": "Classified",
+    "year": 2023,
+    "quarter": "Q2",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2023-04-21-unclassified.pdf",
+    "title": "Unclassified Personnel - April 2023",
+    "date": "2023-04-21",
+    "type": "Unclassified",
+    "year": 2023,
+    "quarter": "Q2",
+    "author": "OSU",
     "submitter": "Johnson, Jax S. (Site Admin)"
   },
   {
     "filename": "2024-02-15-unclassified.pdf",
-    "title": "Unclassified Personnel - Febuary 2024",
-    "date": "2025-12-15",
-    "type": "Classified",
+    "title": "Unclassified Personnel - February 2024",
+    "date": "2024-02-15",
+    "type": "Unclassified",
     "year": 2024,
     "quarter": "Q1",
-    "author": "Mandzuk, Michael David (OSU)",
+    "author": "OSU",
+    "submitter": "Johnson, Jax S. (Site Admin)"
+  },
+  {
+    "filename": "2024-04-16-unclassified.pdf",
+    "title": "Unclassified Personnel - April 2024",
+    "date": "2024-04-16",
+    "type": "Unclassified",
+    "year": 2024,
+    "quarter": "Q2",
+    "author": "OSU",
     "submitter": "Johnson, Jax S. (Site Admin)"
   },
   {
     "filename": "2025-01-21-unclassified.pdf",
     "title": "Unclassified Personnel - January 2025",
-    "date": "2025-01-15",
-    "type": "Classified",
+    "date": "2025-01-21",
+    "type": "Unclassified",
     "year": 2025,
     "quarter": "Q1",
-    "author": "Mandzuk, Michael David (OSU)",
+    "author": "OSU",
     "submitter": "Johnson, Jax S. (Site Admin)"
   },
   {
-    "filename": "2025-04-15-class.pdf",
+    "filename": "2025-04-15-classified.pdf",
     "title": "Classified Personnel - April 2025",
     "date": "2025-04-15",
     "type": "Classified",
@@ -40,33 +270,33 @@
     "submitter": "Johnson, Jax S. (Site Admin)"
   },
   {
-    "filename": "2025-04-15-unclass.pdf",
+    "filename": "2025-04-15-unclassified.pdf",
     "title": "Unclassified Personnel - April 2025",
     "date": "2025-04-15",
     "type": "Unclassified",
     "year": 2025,
     "quarter": "Q2",
-    "author": "Mandzuk, Michael David (OSU)",
+    "author": "OSU",
     "submitter": "Johnson, Jax S. (Site Admin)"
   },
   {
-    "filename": "2025-10-21-Classified.pdf",
+    "filename": "2025-10-21-classified.pdf",
     "title": "Classified Personnel - October 2025",
     "date": "2025-10-21",
     "type": "Classified",
     "year": 2025,
     "quarter": "Q4",
-    "author": "Mandzuk, Michael David (OSU)",
+    "author": "OSU",
     "submitter": "Johnson, Jax S. (Site Admin)"
   },
   {
-    "filename": "2025-10-21-Unclassified-Personnel.pdf",
+    "filename": "2025-10-21-unclassified.pdf",
     "title": "Unclassified Personnel - October 2025",
     "date": "2025-10-21",
     "type": "Unclassified",
     "year": 2025,
     "quarter": "Q4",
-    "author": "Mandzuk, Michael David (OSU)",
+    "author": "OSU",
     "submitter": "Johnson, Jax S. (Site Admin)"
   }
 ]
