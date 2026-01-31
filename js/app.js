@@ -42,10 +42,10 @@ const calculateSnapshotPay = (snapshot) => {
 
 const isPersonActive = (person) => {
     if (!person || !person._lastDate) return false;
-    
-    return person._isUnclass
-        ? (!state.latestUnclassDate || person._lastDate === state.latestUnclassDate)
-        : (!state.latestClassDate || person._lastDate === state.latestClassDate);
+
+    // Optimized: Use cached classification to avoid redundant string parsing
+    const targetDate = person._isUnclass ? state.latestUnclassDate : state.latestClassDate;
+    return !targetDate || person._lastDate === targetDate;
 };
 
 // --- UPDATED SPARKLINE FUNCTION ---
@@ -199,8 +199,8 @@ fetch('data.json')
 
                 // Cache Active Status (Optimization)
                 p._lastDate = lastSnap.Date;
-                p._lastSource = (lastSnap.Source || "").toLowerCase();
-                p._isUnclass = p._lastSource.includes('unclass');
+                // Optimized: Compute isUnclass directly, no need to store _lastSource
+                p._isUnclass = (lastSnap.Source || "").toLowerCase().includes('unclass');
 
                 if (lastSnap.Date) {
                     if (p._isUnclass) {
