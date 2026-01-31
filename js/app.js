@@ -44,6 +44,17 @@ const getPersonTotalPay = (person) => {
     return calculateSnapshotPay(lastSnapshot);
 };
 
+const isPersonActive = (person) => {
+    if (!person || !person.Timeline || person.Timeline.length === 0) return false;
+    const lastSnap = person.Timeline[person.Timeline.length - 1];
+    const src = (lastSnap.Source || "").toLowerCase();
+    const isUnclass = src.includes('unclass');
+    
+    return isUnclass 
+        ? (!state.latestUnclassDate || lastSnap.Date === state.latestUnclassDate)
+        : (!state.latestClassDate || lastSnap.Date === state.latestClassDate);
+};
+
 // --- UPDATED SPARKLINE FUNCTION ---
 const generateSparkline = (timeline) => {
     if (!timeline || timeline.length === 0) return '';
@@ -135,7 +146,10 @@ const state = {
         type: 'all',
         role: '',
         minSalary: null,
-        maxSalary: null
+        maxSalary: null,
+        showInactive: false,
+        sort: 'name-asc',   // Default sort: A-Z
+        fullTimeOnly: false // Default: Show all FTEs
     }
 };
 
@@ -146,6 +160,9 @@ const els = {
     roleInput: document.getElementById('role-filter'),
     salaryMin: document.getElementById('salary-min'),
     salaryMax: document.getElementById('salary-max'),
+    inactiveToggle: document.getElementById('show-inactive'),
+    sortSelect: document.getElementById('sort-order'),
+    fteToggle: document.getElementById('fte-toggle'),
     suggestedSearches: document.getElementById('suggested-searches'),
     results: document.getElementById('results'),
     stats: document.getElementById('stats-bar'),
@@ -256,14 +273,11 @@ function renderInteractiveCharts(history) {
         container = document.createElement('div');
         container.id = 'historical-charts-container';
         
-        // This removes the container from the grid layout flow, allowing the children
-        // (the cards) to snap directly to the dashboard grid columns.
         container.style.display = 'contents';
         
         els.dashboard.appendChild(container);
     }
 
-    // Standard warning box HTML to be reused in both cards
     const warningBox = `
         <div style="background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.3); color: #facc15; padding: 10px; border-radius: 6px; font-size: 0.8rem; margin-bottom: 15px; display: flex; align-items: flex-start; gap: 8px; line-height: 1.4;">
             <span style="font-size: 1.1rem; line-height: 1;">⚠️</span>
@@ -383,12 +397,32 @@ function runSearch() {
     const term = state.filters.text.toLowerCase();
     const typeFilter = state.filters.type;
     const roleFilter = state.filters.role.toLowerCase();
-    const { minSalary, maxSalary } = state.filters;
+    const { minSalary, maxSalary, showInactive, sort, fullTimeOnly } = state.filters;
 
-    state.filteredKeys = state.masterKeys.filter(name => {
+    // 1. FILTERING
+    let results = state.masterKeys.filter(name => {
         const person = state.masterData[name];
+        
+        // Active/Inactive Check
+        const isActive = isPersonActive(person);
+        if (!showInactive && !isActive) return false;
+
+        // Search Text
         if (person._searchStr && !person._searchStr.includes(term)) return false;
 
+        // Full-Time Check (1.0 FTE)
+        if (fullTimeOnly) {
+            const lastSnap = person.Timeline[person.Timeline.length - 1];
+            // Check if any single job is >= 100% or if you prefer total FTE, you'd sum them.
+            // Using logic: At least one job record must be >= 100% (1.0)
+            const isFT = lastSnap.Jobs && lastSnap.Jobs.some(j => {
+                const pct = parseFloat(j['Appt Percent']);
+                return !isNaN(pct) && pct >= 100;
+            });
+            if (!isFT) return false;
+        }
+
+        // Type Filter
         if (typeFilter !== 'all') {
             const lastSnap = person.Timeline[person.Timeline.length - 1];
             if (!lastSnap) return false;
@@ -398,6 +432,7 @@ function runSearch() {
             if (typeFilter === 'classified' && (isUnclass || !src.includes('class'))) return false;
         }
 
+        // Role Filter
         if (roleFilter) {
             const hasRole = person.Timeline.some(snap =>
                 snap.Jobs && snap.Jobs.some(job => (job['Job Title'] || '').toLowerCase().includes(roleFilter))
@@ -405,6 +440,7 @@ function runSearch() {
             if (!hasRole) return false;
         }
 
+        // Salary Range
         if (minSalary !== null || maxSalary !== null) {
             const salary = getPersonTotalPay(person);
             if (minSalary !== null && salary < minSalary) return false;
@@ -413,6 +449,29 @@ function runSearch() {
         return true;
     });
 
+    // 2. SORTING
+    results.sort((keyA, keyB) => {
+        const pA = state.masterData[keyA];
+        const pB = state.masterData[keyB];
+
+        switch (sort) {
+            case 'salary-desc':
+                return getPersonTotalPay(pB) - getPersonTotalPay(pA);
+            case 'salary-asc':
+                return getPersonTotalPay(pA) - getPersonTotalPay(pB);
+            case 'tenure-desc':
+                return (new Date(pA.Meta["First Hired"] || 0)) - (new Date(pB.Meta["First Hired"] || 0)); // Older date = Higher Tenure
+            case 'tenure-asc':
+                return (new Date(pB.Meta["First Hired"] || 0)) - (new Date(pA.Meta["First Hired"] || 0)); // Newer date = Lower Tenure
+            case 'name-desc':
+                return keyB.localeCompare(keyA);
+            case 'name-asc':
+            default:
+                return keyA.localeCompare(keyB);
+        }
+    });
+
+    state.filteredKeys = results;
     state.visibleCount = state.batchSize;
     renderInitial();
     updateStats();
@@ -430,16 +489,14 @@ function calculateStats(keys) {
 
     keys.forEach(key => {
         const p = state.masterData[key];
+        // Calculate stats based on VISIBLE records (matching user filters)
+        // Note: If you want stats to ALWAYS be "active only" regardless of view, use isPersonActive(p).
+        // Current logic: Stats reflect exactly what is in the filtered list.
+        
         if (!p.Timeline || p.Timeline.length === 0) return;
         const lastSnap = p.Timeline[p.Timeline.length - 1];
         const src = (lastSnap.Source || "").toLowerCase();
         const isUnclass = src.includes('unclass');
-        
-        const isLatest = isUnclass 
-            ? (!state.latestUnclassDate || lastSnap.Date === state.latestUnclassDate)
-            : (!state.latestClassDate || lastSnap.Date === state.latestClassDate);
-
-        if (!isLatest) return;
         
         count++; 
         const salary = getPersonTotalPay(p);
@@ -558,11 +615,7 @@ function generateCardHTML(name, idx) {
     const totalPay = getPersonTotalPay(person);
     const reversedTimeline = person.Timeline.slice().reverse();
 
-    const src = (lastSnapshot.Source || "").toLowerCase();
-    const isUnclass = src.includes('unclass');
-    const isLatest = isUnclass 
-        ? (!state.latestUnclassDate || lastSnapshot.Date === state.latestUnclassDate)
-        : (!state.latestClassDate || lastSnapshot.Date === state.latestClassDate);
+    const isLatest = isPersonActive(person);
     
     const badgeHTML = !isLatest ? `<span class="badge" style="background:#ef4444; color:white; margin-left:10px;">FORMER / INACTIVE</span>` : '';
     const reportHistoryHTML = person.Timeline.map(snap => `<span class="badge badge-source" style="margin-right:4px; margin-bottom:4px;">${snap.Date}</span>`).join('');
@@ -670,6 +723,9 @@ els.typeSelect.addEventListener('change', (e) => { state.filters.type = e.target
 els.roleInput.addEventListener('input', debounce((e) => { state.filters.role = e.target.value; runSearch(); }, 300));
 els.salaryMin.addEventListener('input', debounce((e) => { state.filters.minSalary = parseFloat(e.target.value) || null; runSearch(); }, 300));
 els.salaryMax.addEventListener('input', debounce((e) => { state.filters.maxSalary = parseFloat(e.target.value) || null; runSearch(); }, 300));
+els.inactiveToggle.addEventListener('change', (e) => { state.filters.showInactive = e.target.checked; runSearch(); });
+els.sortSelect.addEventListener('change', (e) => { state.filters.sort = e.target.value; runSearch(); });
+els.fteToggle.addEventListener('change', (e) => { state.filters.fullTimeOnly = e.target.checked; runSearch(); });
 
 function setupTooltips() {
     const tooltipEl = document.getElementById('custom-tooltip');
