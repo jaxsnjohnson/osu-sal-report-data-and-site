@@ -183,6 +183,9 @@ fetch('data.json')
         let maxUnclassDate = "";
         const allRoles = new Set();
         const statsMap = {};
+        // Optimization: Snapshot dates repeat across the dataset (~20 unique report dates).
+        // Cache Date parsing to avoid re-parsing the same date string for every record during init.
+        const dateTsCache = new Map();
 
         Object.keys(data).forEach(key => {
             const p = data[key];
@@ -244,7 +247,13 @@ fetch('data.json')
 
                     // Pre-calculate pay and date object for sparklines
                     snap._pay = calculateSnapshotPay(snap);
-                    snap._ts = new Date(snap.Date).getTime();
+                    const dateStr = snap.Date; // may be undefined for malformed rows
+                    let ts = dateTsCache.get(dateStr);
+                    if (ts === undefined) {
+                        ts = new Date(dateStr).getTime();
+                        dateTsCache.set(dateStr, ts);
+                    }
+                    snap._ts = ts;
 
                     // History Stats Logic
                     const date = snap.Date;
