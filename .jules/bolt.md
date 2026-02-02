@@ -5,3 +5,7 @@
 ## 2026-01-31 - Optimized Data Initialization
 **Learning:** Pre-parsing numeric values (like salary strings) once during the initial data pass yielded a ~45% reduction in initialization time (330ms -> 180ms). Removing redundant JSON stringification for search strings also saved significant CPU time.
 **Action:** When handling large static datasets, convert expensive-to-parse fields (regex-heavy) into native types immediately upon load. Avoid generic serialization (JSON.stringify) for building search indices if only specific fields are needed.
+
+## 2026-02-02 - Cache Snapshot Date Parsing
+**Learning:** `data.json` contains ~115k snapshots but only 23 unique report dates; parsing `new Date(snap.Date)` per snapshot was a measurable chunk of init CPU.
+**Action:** When computing per-snapshot timestamps, cache `Date` parsing by date string (e.g., `Map`) and reuse across the dataset.
