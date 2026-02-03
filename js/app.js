@@ -17,6 +17,23 @@ const cleanMoney = (val) => {
 };
 
 const MS_PER_YEAR = 1000 * 60 * 60 * 24 * 365.25;
+const MIN_TREND_YEARS = 3;
+
+const COLA_EVENTS = [
+    { label: '6.5% COLA', effective: '2024-04-01', pct: 6.5 },
+    { label: '2% COLA', effective: '2024-11-01', pct: 2.0 },
+    { label: '3.5% COLA', effective: '2025-06-01', pct: 3.5 }
+];
+const COLA_TOLERANCE_PCT = 0.4;
+
+const getInflationMap = () => window.INFLATION_INDEX_BY_MONTH || {};
+const getInflationBaseMonth = () => window.INFLATION_BASE_MONTH || '';
+
+const hasInflationData = () => {
+    const map = getInflationMap();
+    const base = getInflationBaseMonth();
+    return !!(base && map[base] && Object.keys(map).length > 0);
+};
 
 const formatDate = (dateStr) => {
     if (!dateStr || dateStr === "Unknown Date") return dateStr;
@@ -42,6 +59,47 @@ const calculateSnapshotPay = (snapshot) => {
     return total;
 };
 
+const medianOf = (arr) => {
+    if (!arr || arr.length === 0) return 0;
+    const sorted = arr.slice().sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+};
+
+const formatPct = (value) => `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
+
+const getMonthKey = (dateStr) => {
+    if (!dateStr || dateStr.length < 7) return null;
+    return dateStr.slice(0, 7);
+};
+
+const getInflationIndex = (dateStr) => {
+    const map = getInflationMap();
+    const monthKey = getMonthKey(dateStr);
+    if (!monthKey) return null;
+    if (map[monthKey]) return map[monthKey];
+
+    let [year, month] = monthKey.split('-').map(Number);
+    for (let i = 0; i < 24; i++) {
+        month -= 1;
+        if (month === 0) {
+            month = 12;
+            year -= 1;
+        }
+        const key = `${year}-${String(month).padStart(2, '0')}`;
+        if (map[key]) return map[key];
+    }
+    return null;
+};
+
+const adjustForInflation = (amount, dateStr) => {
+    const map = getInflationMap();
+    const base = map[getInflationBaseMonth()];
+    const idx = getInflationIndex(dateStr);
+    if (!base || !idx) return amount;
+    return amount * (base / idx);
+};
+
 const isPersonActive = (person) => {
     if (!person || !person._lastDate) return false;
 
@@ -50,73 +108,103 @@ const isPersonActive = (person) => {
     return !targetDate || person._lastDate === targetDate;
 };
 
-// --- UPDATED SPARKLINE FUNCTION ---
-const generateSparkline = (timeline) => {
-    if (!timeline || timeline.length === 0) return '';
-
-    // 1. Prepare Data & Check Duration (< 3 Years)
+const getTimelineYears = (timeline) => {
+    if (!timeline || timeline.length === 0) return 0;
     const startTime = timeline[0]._ts;
     const endTime = timeline[timeline.length - 1]._ts;
-    const yearsDiff = (endTime - startTime) / MS_PER_YEAR;
-    
-    // IF LESS THAN 3 YEARS: Return text only, do not render chart
-    if (yearsDiff < 3) {
+    if (!startTime || !endTime) return 0;
+    return (endTime - startTime) / MS_PER_YEAR;
+};
+
+const calculateMovingAverage = (data, windowSize, accessor = (d) => d) => {
+    const ma = [];
+    for (let i = 0; i < data.length; i++) {
+        const start = Math.max(0, i - windowSize + 1);
+        const end = i + 1;
+        const subset = data.slice(start, end);
+        const avg = subset.reduce((sum, item) => sum + accessor(item), 0) / subset.length;
+        ma.push(avg);
+    }
+    return ma;
+};
+
+const getChartOptions = ({ yTickCallback, legend = true, animation = true, xTickLimit } = {}) => {
+    const xTicks = { color: '#888' };
+    if (xTickLimit) xTicks.maxTicksLimit = xTickLimit;
+
+    const yTicks = { color: '#888' };
+    if (yTickCallback) yTicks.callback = yTickCallback;
+
+    return {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation,
+        plugins: {
+            legend: { display: legend, labels: { color: '#ccc' } },
+            tooltip: { mode: 'index', intersect: false }
+        },
+        scales: {
+            x: { ticks: xTicks, grid: { color: '#333' } },
+            y: { ticks: yTicks, grid: { color: '#333' } }
+        }
+    };
+};
+
+const buildColaPairs = (dates, events) => {
+    if (!dates || dates.length === 0) return [];
+    return events.map(event => {
+        let before = null;
+        let after = null;
+        for (let i = 0; i < dates.length; i++) {
+            const d = dates[i];
+            if (d <= event.effective) before = d;
+            if (!after && d >= event.effective) after = d;
+        }
+        return { ...event, beforeDate: before, afterDate: after };
+    });
+};
+
+const getPersonTrendHTML = (timeline, chartId) => {
+    if (!timeline || timeline.length === 0) return '';
+    const yearsDiff = getTimelineYears(timeline);
+    if (yearsDiff < MIN_TREND_YEARS) {
         return `
-            <div style="padding: 20px; text-align: center; color: #888; font-size: 0.85rem; background: rgba(255,255,255,0.03); border-radius: 4px;">
-                ⚠️ History covers less than 3 years. Trend chart available for longer tenures only.
+            <div class="trend-empty">
+                ⚠️ History covers less than ${MIN_TREND_YEARS} years. Trend chart available for longer tenures only.
             </div>
         `;
     }
-
-    // 2. Dynamic Y-Axis Bounds (Lowest to Highest)
-    let minVal = timeline[0]._pay;
-    let maxVal = minVal;
-
-    for (let i = 1; i < timeline.length; i++) {
-        const val = timeline[i]._pay;
-        if (val < minVal) minVal = val;
-        if (val > maxVal) maxVal = val;
-    }
-
-    // Handle flat-line case to prevent division by zero
-    if (minVal === maxVal) {
-        maxVal = minVal + 1000; 
-        minVal = minVal - 1000;
-    }
-
-    const width = 600; 
-    const height = 100;
-    const padding = 15;
-
-    const timeSpan = endTime - startTime || 1;
-    const valSpan = maxVal - minVal || 1;
-
-    let d = `M`;
-    let dots = '';
-
-    for (let i = 0; i < timeline.length; i++) {
-        const pt = timeline[i];
-        const x = ((pt._ts - startTime) / timeSpan) * (width - 2 * padding) + padding;
-        const y = height - padding - (((pt._pay - minVal) / valSpan) * (height - 2 * padding));
-        
-        d += `${i === 0 ? '' : ' L'}${x},${y}`;
-        
-        // INTERACTIVE DOT: Uses data-tooltip for instant custom hover
-        dots += `<circle cx="${x}" cy="${y}" r="8" fill="transparent" stroke="none" style="cursor: pointer;" data-tooltip="${pt.Date}: ${formatMoney(pt._pay)}"></circle>`;
-        
-        // Visual Dot (Visual only, no events)
-        dots += `<circle cx="${x}" cy="${y}" r="3" fill="#4ade80" opacity="0.9" style="pointer-events:none;" />`;
-    }
-
+    const inflationReady = hasInflationData();
+    const inflationTooltip = inflationReady ? '' : 'Inflation data not loaded yet.';
+    const inflationSelect = inflationReady
+        ? `
+            <select class="trend-mode" data-chart-id="${chartId}" data-ready="true">
+                <option value="off" selected>Inflation: Off</option>
+                <option value="adjusted">Inflation: Adjusted (graph wide)</option>
+                <option value="compare">Inflation: Adjusted (separate line)</option>
+            </select>
+        `
+        : `
+            <select class="trend-mode" data-chart-id="${chartId}" disabled data-tooltip="${inflationTooltip}">
+                <option value="off" selected>Inflation: Off (data missing)</option>
+            </select>
+        `;
     return `
-        <div class="sparkline-container" style="width:100%; height:${height}px; position: relative; background: rgba(255,255,255,0.03); border-radius: 4px; border: 1px solid rgba(255,255,255,0.05);">
-            <div style="position:absolute; top:2px; left:5px; font-size:10px; color:#4ade80; opacity:0.8;">Max: ${formatMoney(maxVal)}</div>
-            <div style="position:absolute; bottom:2px; left:5px; font-size:10px; color:#888; opacity:0.8;">Min: ${formatMoney(minVal)}</div>
-            
-            <svg width="100%" height="100%" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
-                <path d="${d}" fill="none" stroke="#4ade80" stroke-width="2" />
-                ${dots}
-            </svg>
+        <div class="trend-header">
+            <div class="stat-label">Total Compensation Trend</div>
+            <div class="trend-controls">
+                ${inflationSelect}
+                <label class="trend-toggle">
+                    <input type="checkbox" class="gap-toggle-input" data-chart-id="${chartId}">
+                    Missing data
+                </label>
+            </div>
+        </div>
+        <div class="person-chart-wrap">
+            <canvas id="${chartId}" data-person-chart="true" role="img" aria-label="Total compensation trend"></canvas>
+            <div class="trend-legend hidden">
+                <span class="legend-item"><span class="legend-line missing"></span> Missing data</span>
+            </div>
         </div>
     `;
 };
@@ -133,7 +221,12 @@ const state = {
     historyStats: [],
     latestClassDate: "",
     latestUnclassDate: "",
-    chartInstances: {}, 
+    snapshotDates: [],
+    colaPairs: [],
+    peerMedianMap: {},
+    peerBuckets: {},
+    keyBuckets: {},
+    personCharts: {},
     filters: {
         text: '',
         type: 'all',
@@ -176,6 +269,8 @@ const els = {
 // ==========================================
 // INITIALIZATION
 // ==========================================
+const inflationReady = window.loadInflationData ? window.loadInflationData() : Promise.resolve();
+
 fetch('data.json')
     .then(res => res.json())
     .then(data => {
@@ -183,6 +278,8 @@ fetch('data.json')
         let maxUnclassDate = "";
         const allRoles = new Set();
         const statsMap = {};
+        const snapshotDates = new Set();
+        const peerBuckets = {};
         // Optimization: Snapshot dates repeat across the dataset (~20 unique report dates).
         // Cache Date parsing to avoid re-parsing the same date string for every record during init.
         const dateTsCache = new Map();
@@ -192,9 +289,16 @@ fetch('data.json')
             const uniqueRoles = new Set();
 
             if (p.Timeline && p.Timeline.length > 0) {
+                p._snapByDate = {};
+
+                // Sort timeline once during initialization
+                p.Timeline.sort((a, b) => (a.Date || "").localeCompare(b.Date || ""));
+
                 const lastIdx = p.Timeline.length - 1;
                 const lastSnap = p.Timeline[lastIdx];
                 const lastJob = (lastSnap.Jobs && lastSnap.Jobs.length > 0) ? lastSnap.Jobs[0] : {};
+                p._lastSnapshot = lastSnap;
+                p._lastJob = lastJob;
                 const role = lastJob['Job Title'] || '';
                 const jobOrg = lastJob['Job Orgn'] || '';
 
@@ -223,10 +327,11 @@ fetch('data.json')
                 }
 
                 // Unified Timeline Iteration (History + Roles)
-                // Sort timeline once during initialization
-                p.Timeline.sort((a, b) => (a.Date || "").localeCompare(b.Date || ""));
-
                 p.Timeline.forEach((snap, idx) => {
+                    if (snap.Date) {
+                        p._snapByDate[snap.Date] = snap;
+                        snapshotDates.add(snap.Date);
+                    }
                     // Optimization: Pre-parse salary rates and collect roles
                     if (snap.Jobs) {
                         snap.Jobs.forEach(job => {
@@ -245,7 +350,7 @@ fetch('data.json')
                         });
                     }
 
-                    // Pre-calculate pay and date object for sparklines
+                    // Pre-calculate pay and date object for trend charts
                     snap._pay = calculateSnapshotPay(snap);
                     const dateStr = snap.Date; // may be undefined for malformed rows
                     let ts = dateTsCache.get(dateStr);
@@ -266,18 +371,34 @@ fetch('data.json')
                     if (src.includes('unclass')) statsMap[date].unclassified++;
                     else statsMap[date].classified++;
 
+                    const primaryJob = (snap.Jobs && snap.Jobs.length > 0) ? snap.Jobs[0] : null;
+                    if (primaryJob && date) {
+                        const org = primaryJob['Job Orgn'] || 'Unknown';
+                        const role = primaryJob['Job Title'] || 'Unknown';
+                        const key = `${org}||${role}`;
+                        if (!peerBuckets[date]) peerBuckets[date] = {};
+                        if (!peerBuckets[date][key]) peerBuckets[date][key] = [];
+                        peerBuckets[date][key].push(snap._pay || 0);
+                    }
+
                     // Set p._totalPay if this is the last snapshot
                     if (idx === lastIdx) {
                         p._totalPay = pay;
                     }
                 });
 
+                p._isFullTime = false;
+                if (lastSnap.Jobs && lastSnap.Jobs.length > 0) {
+                    p._isFullTime = lastSnap.Jobs.some(job => (job._pct !== undefined ? job._pct : parseFloat(job['Appt Percent'])) >= 100);
+                }
                 p._roleStr = Array.from(uniqueRoles).join('\0');
 
             } else {
                 p._searchStr = key.toLowerCase();
                 p._totalPay = 0;
                 p._roleStr = "";
+                p._isFullTime = false;
+                p._snapByDate = {};
             }
         });
 
@@ -286,6 +407,20 @@ fetch('data.json')
         state.historyStats = Object.values(statsMap).sort((a, b) => new Date(a.date) - new Date(b.date));
         state.masterData = data;
         state.masterKeys = Object.keys(data).sort();
+        state.snapshotDates = Array.from(snapshotDates).sort();
+        state.colaPairs = buildColaPairs(state.snapshotDates, COLA_EVENTS);
+
+        const peerMedianMap = {};
+        Object.keys(peerBuckets).forEach(date => {
+            peerMedianMap[date] = {};
+            Object.keys(peerBuckets[date]).forEach(key => {
+                peerMedianMap[date][key] = medianOf(peerBuckets[date][key]);
+            });
+        });
+        state.peerMedianMap = peerMedianMap;
+        state.peerBuckets = peerBuckets;
+
+        buildKeyBucketsAndCola();
 
         // Populate Roles
         els.roleDatalist.innerHTML = Array.from(allRoles).sort().map(r => `<option value="\${r}">`).join('');
@@ -300,6 +435,11 @@ fetch('data.json')
         setTimeout(() => {
             renderInteractiveCharts(state.historyStats);
         }, 0);
+
+        inflationReady.then(() => {
+            refreshInflationControls();
+            document.querySelectorAll('.card.expanded').forEach(card => rebuildPersonChart(card));
+        });
 
         if (targetName) {
             autoExpandTarget(targetName);
@@ -378,19 +518,7 @@ function renderInteractiveCharts(history) {
         options: commonOptions
     });
 
-    const calculateMovingAverage = (data, windowSize) => {
-        const ma = [];
-        for (let i = 0; i < data.length; i++) {
-            const start = Math.max(0, i - windowSize + 1);
-            const end = i + 1;
-            const subset = data.slice(start, end);
-            const avg = subset.reduce((sum, item) => sum + item.payroll, 0) / subset.length;
-            ma.push(avg);
-        }
-        return ma;
-    };
-    
-    const trendData = calculateMovingAverage(history, 3);
+    const trendData = calculateMovingAverage(history, 3, (d) => d.payroll);
 
     new Chart(document.getElementById('chart-payroll').getContext('2d'), {
         type: 'line',
@@ -435,6 +563,488 @@ function renderInteractiveCharts(history) {
 }
 
 // ==========================================
+// BUCKETING & COLA DETECTION
+// ==========================================
+function evaluateColaStatus(person) {
+    let received = false;
+    let checked = 0;
+    const missedLabels = [];
+
+    if (!person || !person._snapByDate) return { received, checked, missedLabels };
+
+    for (const event of state.colaPairs) {
+        if (!event.beforeDate || !event.afterDate) continue;
+        if (event.beforeDate === event.afterDate) continue;
+        const beforeSnap = person._snapByDate[event.beforeDate];
+        const afterSnap = person._snapByDate[event.afterDate];
+        if (!beforeSnap || !afterSnap) continue;
+
+        const beforePay = beforeSnap._pay || 0;
+        const afterPay = afterSnap._pay || 0;
+        if (beforePay <= 0) continue;
+
+        checked++;
+        const pctChange = ((afterPay - beforePay) / beforePay) * 100;
+        if (pctChange >= (event.pct - COLA_TOLERANCE_PCT)) {
+            received = true;
+        } else {
+            missedLabels.push(event.label);
+        }
+    }
+
+    return { received, checked, missedLabels };
+}
+
+function buildKeyBucketsAndCola() {
+    const buckets = {
+        all: state.masterKeys,
+        classified: [],
+        unclassified: [],
+        active_all: [],
+        active_classified: [],
+        active_unclassified: [],
+        fulltime_all: [],
+        fulltime_classified: [],
+        fulltime_unclassified: [],
+        fulltime_active_all: [],
+        fulltime_active_classified: [],
+        fulltime_active_unclassified: []
+    };
+
+    state.masterKeys.forEach(name => {
+        const person = state.masterData[name];
+        const isClassified = !person._isUnclass;
+        const isActive = isPersonActive(person);
+        person._isActive = isActive;
+        const isFullTime = !!person._isFullTime;
+
+        if (isClassified) buckets.classified.push(name);
+        else buckets.unclassified.push(name);
+
+        if (isActive) {
+            buckets.active_all.push(name);
+            if (isClassified) buckets.active_classified.push(name);
+            else buckets.active_unclassified.push(name);
+        }
+
+        if (isFullTime) {
+            buckets.fulltime_all.push(name);
+            if (isClassified) buckets.fulltime_classified.push(name);
+            else buckets.fulltime_unclassified.push(name);
+
+            if (isActive) {
+                buckets.fulltime_active_all.push(name);
+                if (isClassified) buckets.fulltime_active_classified.push(name);
+                else buckets.fulltime_active_unclassified.push(name);
+            }
+        }
+
+        if (isClassified) {
+            const colaStatus = evaluateColaStatus(person);
+            person._colaReceived = colaStatus.received;
+            person._colaChecked = colaStatus.checked;
+            person._colaMissedLabels = colaStatus.missedLabels;
+            person._colaMissing = !colaStatus.received && colaStatus.checked > 0;
+        } else {
+            person._colaReceived = true;
+            person._colaChecked = 0;
+            person._colaMissedLabels = [];
+            person._colaMissing = false;
+        }
+    });
+
+    state.keyBuckets = buckets;
+}
+
+function getBaseKeys() {
+    const { type, showInactive, fullTimeOnly } = state.filters;
+    const buckets = state.keyBuckets;
+
+    if (fullTimeOnly) {
+        if (showInactive) {
+            if (type === 'classified') return buckets.fulltime_classified;
+            if (type === 'unclassified') return buckets.fulltime_unclassified;
+            return buckets.fulltime_all;
+        }
+        if (type === 'classified') return buckets.fulltime_active_classified;
+        if (type === 'unclassified') return buckets.fulltime_active_unclassified;
+        return buckets.fulltime_active_all;
+    }
+
+    if (showInactive) {
+        if (type === 'classified') return buckets.classified;
+        if (type === 'unclassified') return buckets.unclassified;
+        return buckets.all;
+    }
+
+    if (type === 'classified') return buckets.active_classified;
+    if (type === 'unclassified') return buckets.active_unclassified;
+    return buckets.active_all;
+}
+
+// ==========================================
+// PERSON CHARTS
+// ==========================================
+function destroyPersonCharts() {
+    Object.values(state.personCharts).forEach(chart => {
+        try { chart.destroy(); } catch (e) { /* no-op */ }
+        if (chart && chart._gapPulseTimer) {
+            clearInterval(chart._gapPulseTimer);
+        }
+    });
+    state.personCharts = {};
+}
+
+function ensurePersonChart(cardEl) {
+    if (!cardEl || typeof Chart === 'undefined') return;
+    const canvas = cardEl.querySelector('canvas[data-person-chart="true"]');
+    if (!canvas) return;
+
+    const chartId = canvas.id;
+    if (state.personCharts[chartId]) return;
+
+    const name = cardEl.getAttribute('data-name');
+    const person = state.masterData[name];
+    if (!person || !person.Timeline || person.Timeline.length === 0) return;
+
+    const yearsDiff = getTimelineYears(person.Timeline);
+    if (yearsDiff < MIN_TREND_YEARS) return;
+
+    const inflationSelect = cardEl.querySelector('.trend-mode');
+    const gapToggle = cardEl.querySelector('.gap-toggle-input');
+    const inflationReady = hasInflationData();
+    let mode = inflationSelect ? inflationSelect.value : 'off';
+    if (!inflationReady) mode = 'off';
+    const showGaps = !!(gapToggle && gapToggle.checked);
+
+    const labels = person.Timeline.map(s => s.Date);
+    const tsList = person.Timeline.map(s => s._ts || 0);
+    const lastIdx = labels.length - 1;
+    const rawSeries = person.Timeline.map(s => s._pay);
+    const adjustedSeries = person.Timeline.map(s => adjustForInflation(s._pay, s.Date));
+    const primarySeries = (mode === 'adjusted') ? adjustedSeries : rawSeries;
+
+    const peerSeries = person.Timeline.map(s => {
+        const primaryJob = (s.Jobs && s.Jobs.length > 0) ? s.Jobs[0] : null;
+        if (!primaryJob) return null;
+        const org = primaryJob['Job Orgn'] || 'Unknown';
+        const role = primaryJob['Job Title'] || 'Unknown';
+        const key = `${org}||${role}`;
+        const median = state.peerMedianMap?.[s.Date]?.[key];
+        if (!median) return null;
+        return (mode === 'adjusted') ? adjustForInflation(median, s.Date) : median;
+    });
+
+    const jobChangePoints = [];
+    let roleStartIdx = 0;
+    let prevTitle = null;
+    person.Timeline.forEach((s, idx) => {
+        const primaryJob = (s.Jobs && s.Jobs.length > 0) ? s.Jobs[0] : null;
+        const title = primaryJob ? (primaryJob['Job Title'] || '') : '';
+        if (idx === 0) {
+            jobChangePoints.push(null);
+            prevTitle = title;
+            return;
+        }
+        if (title && prevTitle && title !== prevTitle) {
+            jobChangePoints.push(primarySeries[idx]);
+            roleStartIdx = idx;
+        } else {
+            jobChangePoints.push(null);
+        }
+        prevTitle = title || prevTitle;
+    });
+    const hasJobChanges = jobChangePoints.some(val => val !== null);
+
+    const roleStartDate = labels[roleStartIdx] || labels[0];
+    const roleTenureYears = (tsList[lastIdx] - tsList[roleStartIdx]) / MS_PER_YEAR;
+
+    let peerPercentile = null;
+    const latestSnap = person._lastSnapshot || person.Timeline[person.Timeline.length - 1];
+    if (latestSnap && latestSnap.Jobs && latestSnap.Jobs.length > 0) {
+        const primaryJob = latestSnap.Jobs[0];
+        const org = primaryJob['Job Orgn'] || 'Unknown';
+        const role = primaryJob['Job Title'] || 'Unknown';
+        const key = `${org}||${role}`;
+        const bucket = state.peerBuckets?.[labels[lastIdx]]?.[key];
+        if (bucket && bucket.length > 1 && rawSeries[lastIdx] > 0) {
+            let below = 0;
+            let equal = 0;
+            bucket.forEach(val => {
+                if (val < rawSeries[lastIdx]) below++;
+                else if (val === rawSeries[lastIdx]) equal++;
+            });
+            peerPercentile = ((below + 0.5 * equal) / bucket.length) * 100;
+        }
+    }
+
+    const yoyMarkers = [];
+    for (let i = 1; i < tsList.length; i++) {
+        const targetTs = tsList[i] - MS_PER_YEAR;
+        let j = i - 1;
+        while (j >= 0 && tsList[j] > targetTs) j--;
+        if (j >= 0 && primarySeries[j] > 0) {
+            const pct = ((primarySeries[i] - primarySeries[j]) / primarySeries[j]) * 100;
+            yoyMarkers.push({ index: i, pct });
+        }
+    }
+
+    const colaBands = (!person._isUnclass) ? COLA_EVENTS.map(event => {
+        let beforeIdx = null;
+        let afterIdx = null;
+        for (let i = 0; i < labels.length; i++) {
+            const d = labels[i];
+            if (d <= event.effective) beforeIdx = i;
+            if (afterIdx === null && d >= event.effective) afterIdx = i;
+        }
+        if (beforeIdx === null || afterIdx === null) return null;
+        return { label: event.label, beforeIdx, afterIdx };
+    }).filter(Boolean) : [];
+
+    const globalIdxMap = new Map((state.snapshotDates || []).map((d, i) => [d, i]));
+    const gapSegments = [];
+    if (showGaps) {
+        for (let i = 0; i < labels.length - 1; i++) {
+            const idxA = globalIdxMap.get(labels[i]);
+            const idxB = globalIdxMap.get(labels[i + 1]);
+            if (idxA === undefined || idxB === undefined) continue;
+            if (idxB - idxA > 1) {
+                gapSegments.push({ leftIdx: i, rightIdx: i + 1, missingCount: idxB - idxA - 1 });
+            }
+        }
+    }
+
+    const overlayPlugin = {
+        id: `overlay-${chartId}`,
+        afterDatasetsDraw(chart) {
+            const ctx = chart.ctx;
+            const xScale = chart.scales.x;
+            const yScale = chart.scales.y;
+
+            gapSegments.forEach(seg => {
+                const xLeft = xScale.getPixelForValue(labels[seg.leftIdx]);
+                const xRight = xScale.getPixelForValue(labels[seg.rightIdx]);
+                const xMid = (xLeft + xRight) / 2;
+                ctx.save();
+                const left = Math.min(xLeft, xRight);
+                const width = Math.max(1, Math.abs(xRight - xLeft));
+                ctx.fillStyle = 'rgba(250, 204, 21, 0.12)';
+                ctx.fillRect(left, yScale.top, width, yScale.bottom - yScale.top);
+                ctx.strokeStyle = 'rgba(250, 204, 21, 0.85)';
+                ctx.setLineDash([6, 6]);
+                ctx.lineWidth = 1.5;
+
+                const drawLine = (x) => {
+                    ctx.beginPath();
+                    ctx.moveTo(x, yScale.top);
+                    ctx.lineTo(x, yScale.bottom);
+                    ctx.stroke();
+                };
+
+                drawLine(xMid);
+                if (seg.missingCount >= 3) {
+                    drawLine(xMid - 5);
+                    drawLine(xMid + 5);
+                }
+
+                ctx.restore();
+            });
+
+            colaBands.forEach(band => {
+                const xStart = xScale.getPixelForValue(labels[band.beforeIdx]);
+                const xEnd = xScale.getPixelForValue(labels[band.afterIdx]);
+                const left = Math.min(xStart, xEnd);
+                const width = Math.max(1, Math.abs(xEnd - xStart));
+                ctx.save();
+                ctx.fillStyle = 'rgba(168, 85, 247, 0.08)';
+                ctx.fillRect(left, yScale.top, width, yScale.bottom - yScale.top);
+                ctx.restore();
+            });
+        }
+    };
+
+    const ctx = canvas.getContext('2d');
+    const chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: 'Total Compensation',
+                    data: primarySeries,
+                    borderColor: '#22c55e',
+                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 2,
+                    order: 2
+                },
+                {
+                    label: 'Peer Median (Org + Role)',
+                    data: peerSeries,
+                    borderColor: '#60a5fa',
+                    borderDash: [4, 4],
+                    fill: false,
+                    pointRadius: 0,
+                    borderWidth: 2,
+                    order: 0
+                }
+            ].concat((mode === 'compare' && inflationReady) ? [{
+                label: 'Inflation-Adjusted (CPI-U)',
+                data: adjustedSeries,
+                borderColor: '#a855f7',
+                borderDash: [2, 4],
+                fill: false,
+                pointRadius: 0,
+                borderWidth: 2,
+                order: 1
+            }] : []).concat(hasJobChanges ? [{
+                label: 'Job Title Change',
+                data: jobChangePoints,
+                showLine: false,
+                pointRadius: 4,
+                pointStyle: 'triangle',
+                borderColor: '#f97316',
+                backgroundColor: '#f97316',
+                order: 3
+            }] : [])
+        },
+        options: getChartOptions({
+            yTickCallback: (value) => formatMoney(value),
+            animation: false,
+            xTickLimit: 6
+        }),
+        plugins: [overlayPlugin]
+    });
+    state.personCharts[chartId] = chart;
+
+    const legendEl = cardEl.querySelector('.trend-legend');
+    if (legendEl) legendEl.classList.toggle('hidden', !showGaps);
+
+    // Static rendering; no pulsing redraw
+
+    const insightsEl = cardEl.querySelector(`.trend-insights-section[data-chart-insights="${chartId}"] .trend-insights`);
+    if (insightsEl) {
+        const insights = buildTrendInsights({
+            labels,
+            rawSeries,
+            adjustedSeries,
+            peerSeries,
+            tsList,
+            inflationReady,
+            mode,
+            hasJobChanges,
+            jobChangePoints,
+            roleStartDate,
+            roleTenureYears,
+            peerPercentile
+        });
+        insightsEl.innerHTML = insights;
+    }
+}
+
+function buildTrendInsights({
+    labels,
+    rawSeries,
+    adjustedSeries,
+    peerSeries,
+    tsList,
+    inflationReady,
+    mode,
+    hasJobChanges,
+    jobChangePoints,
+    roleStartDate,
+    roleTenureYears,
+    peerPercentile
+}) {
+    const items = [];
+    const lastIdx = labels.length - 1;
+
+    if (labels.length >= 2) {
+        let peakIdx = 0;
+        for (let i = 1; i < rawSeries.length; i++) {
+            if (rawSeries[i] > rawSeries[peakIdx]) peakIdx = i;
+        }
+        const peakVal = rawSeries[peakIdx];
+        const currentVal = rawSeries[lastIdx];
+        if (peakVal > 0 && currentVal > 0) {
+            if (peakIdx === lastIdx) {
+                items.push(`Current pay is at peak (${formatDate(labels[peakIdx])}).`);
+            } else {
+                const diff = currentVal - peakVal;
+                const pct = Math.abs(diff / peakVal) * 100;
+                items.push(`Current pay is ${formatMoney(Math.abs(diff))} (${pct.toFixed(1)}%) below peak (${formatDate(labels[peakIdx])}).`);
+            }
+        }
+    }
+    if (labels.length >= 2 && rawSeries[0] > 0 && rawSeries[lastIdx] > 0) {
+        const nominalPct = ((rawSeries[lastIdx] - rawSeries[0]) / rawSeries[0]) * 100;
+        items.push(`Nominal change since ${labels[0]}: ${formatPct(nominalPct)}`);
+    }
+
+    if (inflationReady && adjustedSeries[0] > 0 && adjustedSeries[lastIdx] > 0) {
+        const realPct = ((adjustedSeries[lastIdx] - adjustedSeries[0]) / adjustedSeries[0]) * 100;
+        const inflationNote = realPct >= 0 ? 'outpaced inflation' : 'behind inflation';
+        items.push(`Inflation-adjusted change since ${labels[0]}: ${formatPct(realPct)} (${inflationNote})`);
+    }
+
+    if (tsList.length > 1) {
+        const targetTs = tsList[lastIdx] - MS_PER_YEAR;
+        let j = lastIdx - 1;
+        while (j >= 0 && tsList[j] > targetTs) j--;
+        if (j >= 0 && rawSeries[j] > 0) {
+            const yoyPct = ((rawSeries[lastIdx] - rawSeries[j]) / rawSeries[j]) * 100;
+            items.push(`YoY change: ${formatPct(yoyPct)} (vs ${labels[j]})`);
+        }
+    }
+
+    const peerVal = peerSeries[lastIdx];
+    if (peerVal && rawSeries[lastIdx]) {
+        const diff = rawSeries[lastIdx] - peerVal;
+        const diffPct = (diff / peerVal) * 100;
+        const label = diff >= 0 ? 'above' : 'below';
+        items.push(`Current vs peer median: ${formatMoney(diff)} (${formatPct(diffPct)} ${label})`);
+    }
+
+    if (peerPercentile !== null) {
+        items.push(`Peer percentile (org + role): ${peerPercentile.toFixed(0)}th`);
+    }
+
+    if (roleStartDate && roleTenureYears >= 0) {
+        items.push(`Current role tenure: ${roleTenureYears.toFixed(1)} years (since ${formatDate(roleStartDate)})`);
+    }
+
+    if (labels.length >= 2) {
+        let maxChangeIdx = -1;
+        let maxChangeVal = 0;
+        for (let i = 1; i < rawSeries.length; i++) {
+            const diff = rawSeries[i] - rawSeries[i - 1];
+            const abs = Math.abs(diff);
+            if (abs > maxChangeVal) {
+                maxChangeVal = abs;
+                maxChangeIdx = i;
+            }
+        }
+        if (maxChangeIdx > 0 && rawSeries[maxChangeIdx - 1] > 0) {
+            const diff = rawSeries[maxChangeIdx] - rawSeries[maxChangeIdx - 1];
+            const pct = (diff / rawSeries[maxChangeIdx - 1]) * 100;
+            items.push(`Largest single change: ${formatMoney(diff)} (${formatPct(pct)}) on ${formatDate(labels[maxChangeIdx])}`);
+        }
+    }
+
+    if (hasJobChanges) {
+        const changes = jobChangePoints.filter(v => v !== null).length;
+        items.push(`Job title changes detected: ${changes}`);
+    }
+
+    if (items.length === 0) {
+        return '<div class="insight-item">No insights available for this timeline.</div>';
+    }
+
+    return items.map(text => `<div class="insight-item">${text}</div>`).join('');
+}
+
+// ==========================================
 // SEARCH & FILTER LOGIC
 // ==========================================
 window.applySearch = function(term) {
@@ -446,42 +1056,16 @@ window.applySearch = function(term) {
 
 function runSearch() {
     const term = state.filters.text.toLowerCase();
-    const typeFilter = state.filters.type;
     const roleFilter = state.filters.role.toLowerCase();
-    const { minSalary, maxSalary, showInactive, sort, fullTimeOnly } = state.filters;
+    const { minSalary, maxSalary, sort } = state.filters;
 
     // 1. FILTERING
-    let results = state.masterKeys.filter(name => {
+    const baseKeys = getBaseKeys();
+    let results = baseKeys.filter(name => {
         const person = state.masterData[name];
-        
-        // Active/Inactive Check (Optimized)
-        // If _lastDate is missing, treat as inactive (or empty data)
-        const isActive = person._lastDate && (person._isUnclass
-            ? (!state.latestUnclassDate || person._lastDate === state.latestUnclassDate)
-            : (!state.latestClassDate || person._lastDate === state.latestClassDate));
-
-        if (!showInactive && !isActive) return false;
 
         // Search Text
-        if (person._searchStr && !person._searchStr.includes(term)) return false;
-
-        // Full-Time Check (1.0 FTE)
-        if (fullTimeOnly) {
-            const lastSnap = person.Timeline[person.Timeline.length - 1];
-            // Check if any single job is >= 100% or if you prefer total FTE, you'd sum them.
-            // Using logic: At least one job record must be >= 100% (1.0)
-            const isFT = lastSnap.Jobs && lastSnap.Jobs.some(j => {
-                const pct = parseFloat(j['Appt Percent']);
-                return !isNaN(pct) && pct >= 100;
-            });
-            if (!isFT) return false;
-        }
-
-        // Type Filter (Optimized with cached _isUnclass)
-        if (typeFilter !== 'all') {
-            if (typeFilter === 'unclassified' && !person._isUnclass) return false;
-            if (typeFilter === 'classified' && person._isUnclass) return false;
-        }
+        if (term && person._searchStr && !person._searchStr.includes(term)) return false;
 
         // Role Filter
         if (roleFilter) {
@@ -552,8 +1136,7 @@ function calculateStats(keys) {
         const org = personOrg(p) || 'Unknown';
         orgs[org] = (orgs[org] || 0) + 1;
         
-        const lastSnap = p.Timeline[p.Timeline.length - 1];
-        const lastJob = (lastSnap.Jobs && lastSnap.Jobs.length > 0) ? lastSnap.Jobs[0] : {};
+        const lastJob = p._lastJob || {};
         const role = lastJob['Job Title'] || 'Unknown';
         roles[role] = (roles[role] || 0) + 1;
 
@@ -637,6 +1220,7 @@ function updateDonut(roles, total) {
 
 function personOrg(p) {
     if (p.Meta['Home Orgn']) return p.Meta['Home Orgn'];
+    if (p._lastJob && p._lastJob['Job Orgn']) return p._lastJob['Job Orgn'];
     if (p.Timeline && p.Timeline.length > 0) {
         const lastSnap = p.Timeline[p.Timeline.length - 1];
         if (lastSnap.Jobs && lastSnap.Jobs.length > 0) return lastSnap.Jobs[0]['Job Orgn'];
@@ -651,11 +1235,12 @@ function generateCardHTML(name, idx) {
     const person = state.masterData[name];
     if (!person.Timeline || person.Timeline.length === 0) return '';
     
-    const lastSnapshot = person.Timeline[person.Timeline.length - 1];
-    const lastJob = (lastSnapshot.Jobs && lastSnapshot.Jobs.length > 0) ? lastSnapshot.Jobs[0] : {};
+    const lastSnapshot = person._lastSnapshot || person.Timeline[person.Timeline.length - 1];
+    const lastJob = person._lastJob || ((lastSnapshot.Jobs && lastSnapshot.Jobs.length > 0) ? lastSnapshot.Jobs[0] : {});
     
     const cardId = `card-${idx}`;
     const historyId = `history-${idx}`;
+    const chartId = `person-trend-${idx}`;
     const attrName = name.replace(/"/g, '&quot;');
     const totalPay = person._totalPay || 0;
     const reversedTimeline = person.Timeline.slice().reverse();
@@ -663,14 +1248,24 @@ function generateCardHTML(name, idx) {
     const isLatest = isPersonActive(person);
     
     const badgeHTML = !isLatest ? `<span class="badge" style="background:#ef4444; color:white; margin-left:10px;">FORMER / INACTIVE</span>` : '';
+    const colaTooltip = (person._colaMissedLabels && person._colaMissedLabels.length > 0)
+        ? `Possible COLA not received (${person._colaMissedLabels.join(', ')})`
+        : 'Possible COLA not received for listed events.';
+    const colaWarningHTML = (!person._isUnclass && person._colaMissing)
+        ? `<span class="cola-warning" data-tooltip="${colaTooltip}">!</span>`
+        : '';
     const reportHistoryHTML = person.Timeline.map(snap => `<span class="badge badge-source" style="margin-right:4px; margin-bottom:4px;">${snap.Date}</span>`).join('');
+    const recordGaps = getRecordGaps(person);
+    const recordGapHTML = recordGaps.length
+        ? recordGaps.map(gap => `<div class="record-gap">No data between ${formatDate(gap.start)} and ${formatDate(gap.end)}</div>`).join('')
+        : '';
 
     return `
     <div class="card" id="${cardId}" data-name="${attrName}" style="${!isLatest ? 'opacity: 0.8;' : ''}">
         <div class="card-header" onclick="toggleCard('${cardId}')" onkeydown="handleCardKey(event, '${cardId}')" tabindex="0" role="button" aria-expanded="false" aria-controls="${historyId}">
             <div class="person-info">
                 <div class="name-header">
-                    <h2>${name} ${badgeHTML}</h2>
+                    <h2>${name} ${badgeHTML} ${colaWarningHTML}</h2>
                     <button class="link-btn-card" data-linkname="${attrName}" onclick="copyLink(event, this.dataset.linkname)" aria-label="Copy link">🔗</button>
                 </div>
                 <p>Home Org: ${person.Meta["Home Orgn"] || 'N/A'}</p>
@@ -682,47 +1277,64 @@ function generateCardHTML(name, idx) {
         </div>
 
         <div id="${historyId}" class="history" role="region" aria-label="Job History">
-            <div class="history-meta" style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #444; font-size: 0.9rem; color: #a0a0a0;">
+            <div class="history-meta" style="margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #444; font-size: 0.9rem; color: #a0a0a0;">
                 <strong>Hired:</strong> ${formatDate(person.Meta["First Hired"])} &nbsp;&bull;&nbsp;
                 <strong>Adj Service:</strong> ${formatDate(person.Meta["Adj Service Date"])}
             </div>
-            <table>
-                <thead><tr><th>Date & Source</th><th>Job Details</th><th>Type</th><th>Salary</th></tr></thead>
-                <tbody>
-                    ${reversedTimeline.map((snap, snapIdx) => {
-                        const prevSnap = reversedTimeline[snapIdx + 1];
-                        return (snap.Jobs || []).map(job => {
-                            let diffHTML = '';
-                            if (prevSnap && prevSnap.Jobs) {
-                                const prevJob = prevSnap.Jobs.find(j => j['Posn-Suff'] === job['Posn-Suff']);
-                                if (prevJob) {
-                                    // Optimization: Use pre-parsed _rate
-                                    const currRate = job._rate !== undefined ? job._rate : cleanMoney(job['Annual Salary Rate']);
-                                    const prevRate = prevJob._rate !== undefined ? prevJob._rate : cleanMoney(prevJob['Annual Salary Rate']);
-                                    const diff = currRate - prevRate;
-                                    if (diff !== 0 && prevRate > 0) {
-                                        const pct = (diff / prevRate) * 100;
-                                        diffHTML = `<span class="diff-val ${diff > 0 ? 'diff-positive' : 'diff-negative'}">${diff > 0 ? '+' : ''}${formatMoney(diff)} (${diff > 0 ? '+' : ''}${pct.toFixed(1)}%)</span>`;
-                                    }
-                                }
-                            }
-                            return `<tr><td class="date-cell"><div>${formatDate(snap.Date)}</div><div class="badge badge-source">${(snap.Source || '').substring(0, 15)}...</div></td>
-                                <td><div style="font-weight:600;">${job['Job Title'] || ''}</div><div style="font-size:0.85rem; color:#64748b;">${job['Job Orgn'] || ''}</div></td>
-                                <td><span class="badge badge-type">${job['Job Type'] || '?'}</span></td>
-                                <td class="money-cell">${formatMoney(job['Annual Salary Rate'])}${diffHTML}</td></tr>`;
-                        }).join('')
-                    }).join('')}
-                </tbody>
-            </table>
-            
-            <div class="personal-trend-section" style="margin-top: 20px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 8px;">
-                <div class="stat-label" style="font-size: 0.75rem; margin-bottom: 10px;">Individual Salary Trend</div>
-                ${generateSparkline(person.Timeline)}
+
+            <div class="personal-trend-section">
+                ${getPersonTrendHTML(person.Timeline, chartId)}
             </div>
 
-            <div style="margin-top: 15px; border-top: 1px solid #444; padding-top: 10px;">
-                <div style="font-size: 0.8rem; color: #888; margin-bottom: 5px;">Record appearances:</div>
-                <div style="display: flex; flex-wrap: wrap;">${reportHistoryHTML}</div>
+            <div class="collapsible-section trend-insights-section" data-chart-insights="${chartId}">
+                <button class="section-toggle" type="button" aria-expanded="false">Key Insights</button>
+                <div class="collapsible-body hidden">
+                    <div class="trend-insights">
+                        <div class="insight-item">Insights will appear once the chart loads.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="collapsible-section record-appearances">
+                <button class="section-toggle" type="button" aria-expanded="false">Record appearances</button>
+                <div class="collapsible-body hidden">
+                    <div style="display: flex; flex-wrap: wrap;">${reportHistoryHTML}</div>
+                    ${recordGapHTML}
+                </div>
+            </div>
+
+            <div class="collapsible-section">
+                <button class="section-toggle" type="button" aria-expanded="false">Date & Source / Job Details / Type / Salary</button>
+                <div class="collapsible-body hidden">
+                    <table>
+                        <thead><tr><th>Date & Source</th><th>Job Details</th><th>Type</th><th>Salary</th></tr></thead>
+                        <tbody>
+                            ${reversedTimeline.map((snap, snapIdx) => {
+                                const prevSnap = reversedTimeline[snapIdx + 1];
+                                return (snap.Jobs || []).map(job => {
+                                    let diffHTML = '';
+                                    if (prevSnap && prevSnap.Jobs) {
+                                        const prevJob = prevSnap.Jobs.find(j => j['Posn-Suff'] === job['Posn-Suff']);
+                                        if (prevJob) {
+                                            // Optimization: Use pre-parsed _rate
+                                            const currRate = job._rate !== undefined ? job._rate : cleanMoney(job['Annual Salary Rate']);
+                                            const prevRate = prevJob._rate !== undefined ? prevJob._rate : cleanMoney(prevJob['Annual Salary Rate']);
+                                            const diff = currRate - prevRate;
+                                            if (diff !== 0 && prevRate > 0) {
+                                                const pct = (diff / prevRate) * 100;
+                                                diffHTML = `<span class="diff-val ${diff > 0 ? 'diff-positive' : 'diff-negative'}">${diff > 0 ? '+' : ''}${formatMoney(diff)} (${diff > 0 ? '+' : ''}${pct.toFixed(1)}%)</span>`;
+                                            }
+                                        }
+                                    }
+                                    return `<tr><td class="date-cell"><div>${formatDate(snap.Date)}</div><div class="badge badge-source">${(snap.Source || '').substring(0, 15)}...</div></td>
+                                        <td><div style="font-weight:600;">${job['Job Title'] || ''}</div><div style="font-size:0.85rem; color:#64748b;">${job['Job Orgn'] || ''}</div></td>
+                                        <td><span class="badge badge-type">${job['Job Type'] || '?'}</span></td>
+                                        <td class="money-cell">${formatMoney(job['Annual Salary Rate'])}${diffHTML}</td></tr>`;
+                                }).join('')
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>`;
@@ -732,6 +1344,7 @@ function generateCardHTML(name, idx) {
 // RENDERING & HELPERS
 // ==========================================
 function renderInitial() {
+    destroyPersonCharts();
     const keys = state.filteredKeys.slice(0, state.visibleCount);
     if (keys.length === 0) { els.results.innerHTML = `<p style="text-align:center; color:#888;">No matching records found.</p>`; return; }
     els.results.innerHTML = keys.map((name, idx) => generateCardHTML(name, idx)).join('') + getSentinel();
@@ -751,7 +1364,59 @@ function appendNextBatch() {
 
 const getSentinel = () => `<div id="scroll-sentinel" class="loader-sentinel">${state.visibleCount < state.filteredKeys.length ? 'Loading more...' : 'End of results'}</div>`;
 function updateStats() { els.stats.innerHTML = `Found ${state.filteredKeys.length} matching personnel records.`; }
-function toggleCard(id) { const el = document.getElementById(id); if(el) { el.classList.toggle('expanded'); el.querySelector('.card-header')?.setAttribute('aria-expanded', el.classList.contains('expanded')); } }
+function toggleCard(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle('expanded');
+    const expanded = el.classList.contains('expanded');
+    el.querySelector('.card-header')?.setAttribute('aria-expanded', expanded);
+    if (expanded) ensurePersonChart(el);
+}
+
+function rebuildPersonChart(cardEl) {
+    const canvas = cardEl.querySelector('canvas[data-person-chart="true"]');
+    if (!canvas) return;
+    const chartId = canvas.id;
+    if (state.personCharts[chartId]) {
+        try { state.personCharts[chartId].destroy(); } catch (e) { /* no-op */ }
+        delete state.personCharts[chartId];
+    }
+    ensurePersonChart(cardEl);
+}
+
+function getRecordGaps(person) {
+    if (!person || !person.Timeline || person.Timeline.length < 2) return [];
+    if (!state.snapshotDates || state.snapshotDates.length < 2) return [];
+    const dates = person.Timeline.map(s => s.Date).filter(Boolean).sort();
+    const idxMap = new Map(state.snapshotDates.map((d, i) => [d, i]));
+    const gaps = [];
+
+    for (let i = 0; i < dates.length - 1; i++) {
+        const idxA = idxMap.get(dates[i]);
+        const idxB = idxMap.get(dates[i + 1]);
+        if (idxA === undefined || idxB === undefined) continue;
+        if (idxB - idxA > 1) {
+            const start = state.snapshotDates[idxA + 1];
+            const end = state.snapshotDates[idxB - 1];
+            if (start && end) gaps.push({ start, end });
+        }
+    }
+    return gaps;
+}
+
+function refreshInflationControls() {
+    if (!hasInflationData()) return;
+    document.querySelectorAll('.trend-mode').forEach(select => {
+        if (select.dataset.ready === 'true') return;
+        select.dataset.ready = 'true';
+        select.disabled = false;
+        select.innerHTML = `
+            <option value="off" selected>Inflation: Off</option>
+            <option value="adjusted">Inflation: Adjusted (graph wide)</option>
+            <option value="compare">Inflation: Adjusted (separate line)</option>
+        `;
+    });
+}
 window.handleCardKey = function(e, id) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCard(id); } };
 
 let observer;
@@ -802,6 +1467,24 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.nextElementSibling.classList.toggle('hidden');
         }));
     }
+
+    document.body.addEventListener('change', (e) => {
+        const target = e.target;
+        if (target && (target.classList.contains('trend-mode') || target.classList.contains('gap-toggle-input'))) {
+            const cardEl = target.closest('.card');
+            if (cardEl) rebuildPersonChart(cardEl);
+        }
+    });
+
+    document.body.addEventListener('click', (e) => {
+        const btn = e.target.closest('.section-toggle');
+        if (!btn) return;
+        const body = btn.nextElementSibling;
+        if (!body) return;
+        const expanded = btn.getAttribute('aria-expanded') === 'true';
+        btn.setAttribute('aria-expanded', (!expanded).toString());
+        body.classList.toggle('hidden', expanded);
+    });
 });
 
 function parseUrlParams() {
@@ -811,7 +1494,11 @@ function parseUrlParams() {
 }
 function autoExpandTarget(name) {
     const card = document.querySelector(`.card[data-name="${name.replace(/"/g, '\\"')}"]`);
-    if (card) { card.classList.add('expanded'); setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100); }
+    if (card) {
+        card.classList.add('expanded');
+        ensurePersonChart(card);
+        setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+    }
 }
 function copyLink(e, name) {
     e.stopPropagation();
