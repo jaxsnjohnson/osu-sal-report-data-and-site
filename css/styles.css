@@ -354,6 +354,13 @@ td { padding: 12px 0; border-bottom: 1px solid var(--border); vertical-align: to
     font-weight: 500;
 }
 
+.missing-pay {
+    display: inline-block;
+    color: #f59e0b;
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
 .date-cell { width: 140px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .money-cell { font-family: monospace; font-weight: 600; color: var(--text-main); }
 
