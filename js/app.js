@@ -335,9 +335,22 @@ fetch('data.json')
                     // Optimization: Pre-parse salary rates and collect roles
                     if (snap.Jobs) {
                         snap.Jobs.forEach(job => {
-                            if (job._rate === undefined) {
-                                job._rate = parseFloat(job['Annual Salary Rate']) || 0;
+                            // Handle "term only" rows where the salary rate is missing
+                            const rawRate = job['Annual Salary Rate'];
+                            const rateNum = parseFloat(rawRate);
+                            const term = (job['Salary Term'] || '').trim();
+                            if (term === 'mo' && !isNaN(rateNum) && rateNum > 0 && rateNum <= 12) {
+                                job._missingRate = true;
+                                job._rate = 0;
+                                job['Salary Term'] = `${rateNum} mo`;
+                                job['Annual Salary Rate'] = '';
+                            } else {
+                                job._missingRate = false;
+                                if (job._rate === undefined) {
+                                    job._rate = rateNum || 0;
+                                }
                             }
+
                             // Optimization: Pre-parse appt percent
                             if (job._pct === undefined) {
                                 job._pct = parseFloat(job['Appt Percent']);
@@ -384,6 +397,7 @@ fetch('data.json')
                     // Set p._totalPay if this is the last snapshot
                     if (idx === lastIdx) {
                         p._totalPay = pay;
+                        p._payMissing = (snap.Jobs || []).some(j => j._missingRate);
                     }
                 });
 
@@ -396,6 +410,7 @@ fetch('data.json')
             } else {
                 p._searchStr = key.toLowerCase();
                 p._totalPay = 0;
+                p._payMissing = false;
                 p._roleStr = "";
                 p._isFullTime = false;
                 p._snapByDate = {};
@@ -1243,6 +1258,12 @@ function generateCardHTML(name, idx) {
     const chartId = `person-trend-${idx}`;
     const attrName = name.replace(/"/g, '&quot;');
     const totalPay = person._totalPay || 0;
+    const totalPayLabel = person._payMissing
+        ? (totalPay > 0 ? `${formatMoney(totalPay)}*` : 'Pay missing')
+        : formatMoney(totalPay);
+    const totalPayTooltip = person._payMissing
+        ? 'Total calculated from available rates. One or more appointments list only a term (e.g., 9 or 12 months) with no salary rate in the report.'
+        : 'Total calculated from all active appointments';
     const reversedTimeline = person.Timeline.slice().reverse();
 
     const isLatest = isPersonActive(person);
@@ -1271,7 +1292,7 @@ function generateCardHTML(name, idx) {
                 <p>Home Org: ${person.Meta["Home Orgn"] || 'N/A'}</p>
             </div>
             <div class="latest-stat">
-                <div class="latest-salary" data-tooltip="Total calculated from all active appointments">${formatMoney(totalPay)}</div>
+                <div class="latest-salary" data-tooltip="${totalPayTooltip}">${totalPayLabel}</div>
                 <div class="latest-role">${lastJob['Job Title'] || 'Unknown'}</div>
             </div>
         </div>
@@ -1313,9 +1334,9 @@ function generateCardHTML(name, idx) {
                                 const prevSnap = reversedTimeline[snapIdx + 1];
                                 return (snap.Jobs || []).map(job => {
                                     let diffHTML = '';
-                                    if (prevSnap && prevSnap.Jobs) {
+                                    if (prevSnap && prevSnap.Jobs && !job._missingRate) {
                                         const prevJob = prevSnap.Jobs.find(j => j['Posn-Suff'] === job['Posn-Suff']);
-                                        if (prevJob) {
+                                        if (prevJob && !prevJob._missingRate) {
                                             // Optimization: Use pre-parsed _rate
                                             const currRate = job._rate !== undefined ? job._rate : cleanMoney(job['Annual Salary Rate']);
                                             const prevRate = prevJob._rate !== undefined ? prevJob._rate : cleanMoney(prevJob['Annual Salary Rate']);
@@ -1326,10 +1347,14 @@ function generateCardHTML(name, idx) {
                                             }
                                         }
                                     }
+                                    const termBadge = job['Salary Term'] ? ` <span class="term-badge">${job['Salary Term']}</span>` : '';
+                                    const salaryText = job._missingRate
+                                        ? `<span class="missing-pay" data-tooltip="Report lists only the appointment term; no salary rate was provided.">Rate missing</span>${termBadge}`
+                                        : `${formatMoney(job['Annual Salary Rate'])}${termBadge}`;
                                     return `<tr><td class="date-cell"><div>${formatDate(snap.Date)}</div><div class="badge badge-source">${(snap.Source || '').substring(0, 15)}...</div></td>
                                         <td><div style="font-weight:600;">${job['Job Title'] || ''}</div><div style="font-size:0.85rem; color:#64748b;">${job['Job Orgn'] || ''}</div></td>
                                         <td><span class="badge badge-type">${job['Job Type'] || '?'}</span></td>
-                                        <td class="money-cell">${formatMoney(job['Annual Salary Rate'])}${diffHTML}</td></tr>`;
+                                        <td class="money-cell">${salaryText}${diffHTML}</td></tr>`;
                                 }).join('')
                             }).join('')}
                         </tbody>
