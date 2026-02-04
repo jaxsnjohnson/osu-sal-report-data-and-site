@@ -119,6 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="record-meta">
                 <span class="tag ${typeClass}">${record.type}</span>
                 <span class="tag">Auth: ${record.author}</span>
+                <span class="tag">Source: ${record.source || 'Unknown'}</span>
             </div>
             <a href="reports/${record.filename}"
                target="_blank"
