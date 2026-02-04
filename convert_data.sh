@@ -92,7 +92,16 @@ def parse_single_file(filepath):
                         value = match.group(1).replace(',', '') # Just the number
                         term_part = match.group(2).strip()
                         if term_part:
-                            current_job["Salary Term"] = term_part
+                            # Handle "term only" rows where salary rate is blank and only "9 mo"/"12 mo" appears
+                            try:
+                                term_num = int(float(value))
+                            except:
+                                term_num = None
+                            if term_part == "mo" and term_num in (9, 10, 11, 12):
+                                current_job["Salary Term"] = f"{term_num} mo"
+                                value = ""
+                            else:
+                                current_job["Salary Term"] = term_part
                 
                 elif key == "Full-Time Monthly Salary":
                      match = re.search(r'[\d,]+\.?\d*', value)
