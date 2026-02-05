@@ -67,7 +67,7 @@ You will need a Unix-like environment (Linux, macOS, or WSL) with the following 
     Place any new OSU salary report PDFs into the `reports/` directory.
 
 3.  **Process Data:**
-    Run the conversion script to parse PDFs and generate `data.json`:
+    Run the conversion script to parse PDFs and generate the chunked dataset (`data/index.json`, `data/aggregates.json`, and `data/people/*.json`):
     ```bash
     chmod +x convert_data.sh
     ./convert_data.sh
