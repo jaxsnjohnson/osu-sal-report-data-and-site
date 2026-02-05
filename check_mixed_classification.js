@@ -1,7 +1,19 @@
 const fs = require('fs').promises;
+const path = require('path');
+
+async function loadAllPeople() {
+    const dir = path.join(__dirname, 'data', 'people');
+    const files = (await fs.readdir(dir)).filter(name => name.endsWith('.json'));
+    const data = {};
+    for (const file of files) {
+        const chunk = JSON.parse(await fs.readFile(path.join(dir, file), 'utf8'));
+        Object.assign(data, chunk);
+    }
+    return data;
+}
 
 async function main() {
-    const data = JSON.parse(await fs.readFile('data.json', 'utf8'));
+    const data = await loadAllPeople();
 
     let mixedCount = 0;
     let classifiedToUnclassified = 0;
