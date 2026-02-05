@@ -161,5 +161,8 @@ for person in database:
 print(json.dumps(database, indent=2))
 EOF
 
+echo "Step 3: Splitting data.json into web-friendly chunks..."
+python3 split_data.py
+
 rm -rf temp_txt
 echo "Done."
