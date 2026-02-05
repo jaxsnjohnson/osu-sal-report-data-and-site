@@ -24,7 +24,10 @@ const COLA_EVENTS = [
     { label: '2% COLA', effective: '2024-11-01', pct: 2.0 },
     { label: '3.5% COLA', effective: '2025-06-01', pct: 3.5 }
 ];
-const COLA_TOLERANCE_PCT = 0.4;
+
+const DATA_INDEX_URL = 'data/index.json';
+const DATA_AGG_URL = 'data/aggregates.json';
+const DATA_BUCKET_DIR = 'data/people';
 
 const getInflationMap = () => window.INFLATION_INDEX_BY_MONTH || {};
 const getInflationBaseMonth = () => window.INFLATION_BASE_MONTH || '';
@@ -57,6 +60,112 @@ const calculateSnapshotPay = (snapshot) => {
         if (rate > 0) total += rate * (pct / 100);
     });
     return total;
+};
+
+const bucketForName = (name) => {
+    if (!name) return '_';
+    const ch = name.trim().charAt(0).toLowerCase();
+    return (ch >= 'a' && ch <= 'z') ? ch : '_';
+};
+
+const getBucketUrl = (bucket) => `${DATA_BUCKET_DIR}/${bucket}.json`;
+
+const loadBucket = (bucket) => {
+    if (state.bucketCache[bucket]) return Promise.resolve(state.bucketCache[bucket]);
+    if (state.bucketPromises[bucket]) return state.bucketPromises[bucket];
+    const url = getBucketUrl(bucket);
+    state.bucketPromises[bucket] = fetch(url)
+        .then(res => {
+            if (!res.ok) throw new Error(`Failed to load ${url}`);
+            return res.json();
+        })
+        .then(data => {
+            state.bucketCache[bucket] = data;
+            return data;
+        })
+        .finally(() => {
+            delete state.bucketPromises[bucket];
+        });
+    return state.bucketPromises[bucket];
+};
+
+const hydratePersonDetail = (person) => {
+    if (!person || person._hydrated) return;
+    if (!person.Timeline || person.Timeline.length === 0) {
+        person._hydrated = true;
+        return;
+    }
+
+    person._snapByDate = {};
+    person.Timeline.sort((a, b) => (a.Date || "").localeCompare(b.Date || ""));
+    const dateTsCache = new Map();
+
+    person.Timeline.forEach(snap => {
+        if (snap.Date) person._snapByDate[snap.Date] = snap;
+        if (snap.Jobs) {
+            snap.Jobs.forEach(job => {
+                const rawRate = job['Annual Salary Rate'];
+                const rateNum = parseFloat(rawRate);
+                const term = (job['Salary Term'] || '').trim();
+                if (term === 'mo' && !isNaN(rateNum) && rateNum > 0 && rateNum <= 12) {
+                    job._missingRate = true;
+                    job._rate = 0;
+                    job['Salary Term'] = `${rateNum} mo`;
+                    job['Annual Salary Rate'] = '';
+                } else {
+                    job._missingRate = false;
+                    if (job._rate === undefined) {
+                        job._rate = rateNum || 0;
+                    }
+                }
+
+                if (job._pct === undefined) {
+                    job._pct = parseFloat(job['Appt Percent']);
+                    if (isNaN(job._pct)) job._pct = 0;
+                }
+            });
+        }
+
+        snap._pay = calculateSnapshotPay(snap);
+        const dateStr = snap.Date;
+        let ts = dateTsCache.get(dateStr);
+        if (ts === undefined) {
+            ts = new Date(dateStr).getTime();
+            dateTsCache.set(dateStr, ts);
+        }
+        snap._ts = ts;
+    });
+
+    const lastIdx = person.Timeline.length - 1;
+    const lastSnap = person.Timeline[lastIdx];
+    const lastJob = (lastSnap.Jobs && lastSnap.Jobs.length > 0) ? lastSnap.Jobs[0] : {};
+    person._lastSnapshot = lastSnap;
+    person._lastJob = lastJob;
+    person._totalPay = lastSnap._pay || calculateSnapshotPay(lastSnap);
+    person._payMissing = (lastSnap.Jobs || []).some(j => j._missingRate);
+    person._lastDate = lastSnap.Date;
+    person._isUnclass = (lastSnap.Source || "").toLowerCase().includes('unclass');
+    person._isFullTime = false;
+    if (lastSnap.Jobs && lastSnap.Jobs.length > 0) {
+        person._isFullTime = lastSnap.Jobs.some(job => (job._pct !== undefined ? job._pct : parseFloat(job['Appt Percent'])) >= 100);
+    }
+
+    person._hydrated = true;
+};
+
+const loadPersonDetail = (name) => {
+    if (state.detailCache[name]) return Promise.resolve(state.detailCache[name]);
+    const bucket = bucketForName(name);
+    return loadBucket(bucket).then(bucketData => {
+        const person = bucketData[name];
+        if (!person) {
+            state.detailCache[name] = null;
+            return null;
+        }
+        hydratePersonDetail(person);
+        state.detailCache[name] = person;
+        return person;
+    });
 };
 
 const medianOf = (arr) => {
@@ -150,20 +259,6 @@ const getChartOptions = ({ yTickCallback, legend = true, animation = true, xTick
     };
 };
 
-const buildColaPairs = (dates, events) => {
-    if (!dates || dates.length === 0) return [];
-    return events.map(event => {
-        let before = null;
-        let after = null;
-        for (let i = 0; i < dates.length; i++) {
-            const d = dates[i];
-            if (d <= event.effective) before = d;
-            if (!after && d >= event.effective) after = d;
-        }
-        return { ...event, beforeDate: before, afterDate: after };
-    });
-};
-
 const getPersonTrendHTML = (timeline, chartId) => {
     if (!timeline || timeline.length === 0) return '';
     const yearsDiff = getTimelineYears(timeline);
@@ -222,11 +317,12 @@ const state = {
     latestClassDate: "",
     latestUnclassDate: "",
     snapshotDates: [],
-    colaPairs: [],
     peerMedianMap: {},
-    peerBuckets: {},
     keyBuckets: {},
     personCharts: {},
+    detailCache: {},
+    bucketCache: {},
+    bucketPromises: {},
     filters: {
         text: '',
         type: 'all',
@@ -271,178 +367,38 @@ const els = {
 // ==========================================
 const inflationReady = window.loadInflationData ? window.loadInflationData() : Promise.resolve();
 
-fetch('data.json')
-    .then(res => res.json())
-    .then(data => {
-        let maxClassDate = "";
-        let maxUnclassDate = "";
-        const allRoles = new Set();
-        const statsMap = {};
-        const snapshotDates = new Set();
-        const peerBuckets = {};
-        // Optimization: Snapshot dates repeat across the dataset (~20 unique report dates).
-        // Cache Date parsing to avoid re-parsing the same date string for every record during init.
-        const dateTsCache = new Map();
+Promise.all([
+    fetch(DATA_INDEX_URL).then(res => res.json()),
+    fetch(DATA_AGG_URL).then(res => res.json())
+])
+    .then(([indexData, aggregates]) => {
+        state.masterData = indexData;
+        state.masterKeys = Object.keys(indexData).sort();
+        state.latestClassDate = aggregates.latestClassDate || "";
+        state.latestUnclassDate = aggregates.latestUnclassDate || "";
+        state.snapshotDates = aggregates.snapshotDates || [];
+        state.historyStats = aggregates.historyStats || [];
+        state.peerMedianMap = aggregates.peerMedianMap || {};
 
-        Object.keys(data).forEach(key => {
-            const p = data[key];
-            const uniqueRoles = new Set();
-
-            if (p.Timeline && p.Timeline.length > 0) {
-                p._snapByDate = {};
-
-                // Sort timeline once during initialization
-                p.Timeline.sort((a, b) => (a.Date || "").localeCompare(b.Date || ""));
-
-                const lastIdx = p.Timeline.length - 1;
-                const lastSnap = p.Timeline[lastIdx];
-                const lastJob = (lastSnap.Jobs && lastSnap.Jobs.length > 0) ? lastSnap.Jobs[0] : {};
-                p._lastSnapshot = lastSnap;
-                p._lastJob = lastJob;
-                const role = lastJob['Job Title'] || '';
-                const jobOrg = lastJob['Job Orgn'] || '';
-
-                // Optimized search string: Avoid JSON.stringify and only use relevant fields
-                p._searchStr = (key + " " + (p.Meta["Home Orgn"]||"") + " " + (p.Meta["First Hired"]||"") + " " + role + " " + jobOrg).toLowerCase();
-
-                // Optimization: Pre-parse First Hired date
-                const hiredStr = p.Meta['First Hired'];
-                p._hiredDateTs = 0;
-                if (hiredStr) {
-                    const d = new Date(hiredStr);
-                    if (!isNaN(d)) p._hiredDateTs = d.getTime();
-                }
-
-                // Cache Active Status (Optimization)
-                p._lastDate = lastSnap.Date;
-                // Optimized: Compute isUnclass directly, no need to store _lastSource
-                p._isUnclass = (lastSnap.Source || "").toLowerCase().includes('unclass');
-
-                if (lastSnap.Date) {
-                    if (p._isUnclass) {
-                        if (lastSnap.Date > maxUnclassDate) maxUnclassDate = lastSnap.Date;
-                    } else {
-                        if (lastSnap.Date > maxClassDate) maxClassDate = lastSnap.Date;
-                    }
-                }
-
-                // Unified Timeline Iteration (History + Roles)
-                p.Timeline.forEach((snap, idx) => {
-                    if (snap.Date) {
-                        p._snapByDate[snap.Date] = snap;
-                        snapshotDates.add(snap.Date);
-                    }
-                    // Optimization: Pre-parse salary rates and collect roles
-                    if (snap.Jobs) {
-                        snap.Jobs.forEach(job => {
-                            // Handle "term only" rows where the salary rate is missing
-                            const rawRate = job['Annual Salary Rate'];
-                            const rateNum = parseFloat(rawRate);
-                            const term = (job['Salary Term'] || '').trim();
-                            if (term === 'mo' && !isNaN(rateNum) && rateNum > 0 && rateNum <= 12) {
-                                job._missingRate = true;
-                                job._rate = 0;
-                                job['Salary Term'] = `${rateNum} mo`;
-                                job['Annual Salary Rate'] = '';
-                            } else {
-                                job._missingRate = false;
-                                if (job._rate === undefined) {
-                                    job._rate = rateNum || 0;
-                                }
-                            }
-
-                            // Optimization: Pre-parse appt percent
-                            if (job._pct === undefined) {
-                                job._pct = parseFloat(job['Appt Percent']);
-                                if (isNaN(job._pct)) job._pct = 0;
-                            }
-                            if (job['Job Title']) {
-                                allRoles.add(job['Job Title']);
-                                uniqueRoles.add(job['Job Title'].toLowerCase());
-                            }
-                        });
-                    }
-
-                    // Pre-calculate pay and date object for trend charts
-                    snap._pay = calculateSnapshotPay(snap);
-                    const dateStr = snap.Date; // may be undefined for malformed rows
-                    let ts = dateTsCache.get(dateStr);
-                    if (ts === undefined) {
-                        ts = new Date(dateStr).getTime();
-                        dateTsCache.set(dateStr, ts);
-                    }
-                    snap._ts = ts;
-
-                    // History Stats Logic
-                    const date = snap.Date;
-                    if (!statsMap[date]) {
-                        statsMap[date] = { date: date, classified: 0, unclassified: 0, payroll: 0 };
-                    }
-                    const src = (snap.Source || "").toLowerCase();
-                    const pay = calculateSnapshotPay(snap);
-                    statsMap[date].payroll += pay;
-                    if (src.includes('unclass')) statsMap[date].unclassified++;
-                    else statsMap[date].classified++;
-
-                    const primaryJob = (snap.Jobs && snap.Jobs.length > 0) ? snap.Jobs[0] : null;
-                    if (primaryJob && date) {
-                        const org = primaryJob['Job Orgn'] || 'Unknown';
-                        const role = primaryJob['Job Title'] || 'Unknown';
-                        const key = `${org}||${role}`;
-                        if (!peerBuckets[date]) peerBuckets[date] = {};
-                        if (!peerBuckets[date][key]) peerBuckets[date][key] = [];
-                        peerBuckets[date][key].push(snap._pay || 0);
-                    }
-
-                    // Set p._totalPay if this is the last snapshot
-                    if (idx === lastIdx) {
-                        p._totalPay = pay;
-                        p._payMissing = (snap.Jobs || []).some(j => j._missingRate);
-                    }
-                });
-
-                p._isFullTime = false;
-                if (lastSnap.Jobs && lastSnap.Jobs.length > 0) {
-                    p._isFullTime = lastSnap.Jobs.some(job => (job._pct !== undefined ? job._pct : parseFloat(job['Appt Percent'])) >= 100);
-                }
-                p._roleStr = Array.from(uniqueRoles).join('\0');
-
-            } else {
-                p._searchStr = key.toLowerCase();
-                p._totalPay = 0;
-                p._payMissing = false;
-                p._roleStr = "";
-                p._isFullTime = false;
-                p._snapByDate = {};
+        state.masterKeys.forEach(name => {
+            const p = state.masterData[name];
+            const hiredStr = p?.Meta?.['First Hired'];
+            p._hiredDateTs = 0;
+            if (hiredStr) {
+                const d = new Date(hiredStr);
+                if (!isNaN(d)) p._hiredDateTs = d.getTime();
             }
         });
-
-        state.latestClassDate = maxClassDate;
-        state.latestUnclassDate = maxUnclassDate;
-        state.historyStats = Object.values(statsMap).sort((a, b) => new Date(a.date) - new Date(b.date));
-        state.masterData = data;
-        state.masterKeys = Object.keys(data).sort();
-        state.snapshotDates = Array.from(snapshotDates).sort();
-        state.colaPairs = buildColaPairs(state.snapshotDates, COLA_EVENTS);
-
-        const peerMedianMap = {};
-        Object.keys(peerBuckets).forEach(date => {
-            peerMedianMap[date] = {};
-            Object.keys(peerBuckets[date]).forEach(key => {
-                peerMedianMap[date][key] = medianOf(peerBuckets[date][key]);
-            });
-        });
-        state.peerMedianMap = peerMedianMap;
-        state.peerBuckets = peerBuckets;
 
         buildKeyBucketsAndCola();
 
         // Populate Roles
-        els.roleDatalist.innerHTML = Array.from(allRoles).sort().map(r => `<option value="\${r}">`).join('');
+        const roles = aggregates.allRoles || [];
+        els.roleDatalist.innerHTML = roles.map(r => `<option value="${r}">`).join('');
 
         renderSuggestedSearches();
-        
-        const targetName = parseUrlParams(); 
+
+        const targetName = parseUrlParams();
         runSearch();
         updateStats();
         setupInfiniteScroll();
@@ -463,7 +419,7 @@ fetch('data.json')
         setupTooltips();
     })
     .catch(err => {
-        els.stats.innerHTML = "Error loading data.json.";
+        els.stats.innerHTML = "Error loading data files.";
         console.error(err);
     });
 
@@ -578,38 +534,8 @@ function renderInteractiveCharts(history) {
 }
 
 // ==========================================
-// BUCKETING & COLA DETECTION
+// BUCKETING
 // ==========================================
-function evaluateColaStatus(person) {
-    let received = false;
-    let checked = 0;
-    const missedLabels = [];
-
-    if (!person || !person._snapByDate) return { received, checked, missedLabels };
-
-    for (const event of state.colaPairs) {
-        if (!event.beforeDate || !event.afterDate) continue;
-        if (event.beforeDate === event.afterDate) continue;
-        const beforeSnap = person._snapByDate[event.beforeDate];
-        const afterSnap = person._snapByDate[event.afterDate];
-        if (!beforeSnap || !afterSnap) continue;
-
-        const beforePay = beforeSnap._pay || 0;
-        const afterPay = afterSnap._pay || 0;
-        if (beforePay <= 0) continue;
-
-        checked++;
-        const pctChange = ((afterPay - beforePay) / beforePay) * 100;
-        if (pctChange >= (event.pct - COLA_TOLERANCE_PCT)) {
-            received = true;
-        } else {
-            missedLabels.push(event.label);
-        }
-    }
-
-    return { received, checked, missedLabels };
-}
-
 function buildKeyBucketsAndCola() {
     const buckets = {
         all: state.masterKeys,
@@ -652,19 +578,6 @@ function buildKeyBucketsAndCola() {
                 if (isClassified) buckets.fulltime_active_classified.push(name);
                 else buckets.fulltime_active_unclassified.push(name);
             }
-        }
-
-        if (isClassified) {
-            const colaStatus = evaluateColaStatus(person);
-            person._colaReceived = colaStatus.received;
-            person._colaChecked = colaStatus.checked;
-            person._colaMissedLabels = colaStatus.missedLabels;
-            person._colaMissing = !colaStatus.received && colaStatus.checked > 0;
-        } else {
-            person._colaReceived = true;
-            person._colaChecked = 0;
-            person._colaMissedLabels = [];
-            person._colaMissing = false;
         }
     });
 
@@ -719,7 +632,7 @@ function ensurePersonChart(cardEl) {
     if (state.personCharts[chartId]) return;
 
     const name = cardEl.getAttribute('data-name');
-    const person = state.masterData[name];
+    const person = state.detailCache[name];
     if (!person || !person.Timeline || person.Timeline.length === 0) return;
 
     const yearsDiff = getTimelineYears(person.Timeline);
@@ -775,22 +688,9 @@ function ensurePersonChart(cardEl) {
     const roleTenureYears = (tsList[lastIdx] - tsList[roleStartIdx]) / MS_PER_YEAR;
 
     let peerPercentile = null;
-    const latestSnap = person._lastSnapshot || person.Timeline[person.Timeline.length - 1];
-    if (latestSnap && latestSnap.Jobs && latestSnap.Jobs.length > 0) {
-        const primaryJob = latestSnap.Jobs[0];
-        const org = primaryJob['Job Orgn'] || 'Unknown';
-        const role = primaryJob['Job Title'] || 'Unknown';
-        const key = `${org}||${role}`;
-        const bucket = state.peerBuckets?.[labels[lastIdx]]?.[key];
-        if (bucket && bucket.length > 1 && rawSeries[lastIdx] > 0) {
-            let below = 0;
-            let equal = 0;
-            bucket.forEach(val => {
-                if (val < rawSeries[lastIdx]) below++;
-                else if (val === rawSeries[lastIdx]) equal++;
-            });
-            peerPercentile = ((below + 0.5 * equal) / bucket.length) * 100;
-        }
+    const summary = state.masterData[name];
+    if (summary && summary._peerPercentile !== null && summary._peerPercentile !== undefined) {
+        peerPercentile = summary._peerPercentile;
     }
 
     const yoyMarkers = [];
@@ -1140,7 +1040,7 @@ function calculateStats(keys) {
         // Note: If you want stats to ALWAYS be "active only" regardless of view, use isPersonActive(p).
         // Current logic: Stats reflect exactly what is in the filtered list.
         
-        if (!p.Timeline || p.Timeline.length === 0) return;
+        if (!p._hasTimeline) return;
 
         count++; 
         // Optimization: Use cached pay and status
@@ -1246,35 +1146,12 @@ function personOrg(p) {
 // ==========================================
 // CARD GENERATION
 // ==========================================
-function generateCardHTML(name, idx) {
-    const person = state.masterData[name];
-    if (!person.Timeline || person.Timeline.length === 0) return '';
-    
-    const lastSnapshot = person._lastSnapshot || person.Timeline[person.Timeline.length - 1];
-    const lastJob = person._lastJob || ((lastSnapshot.Jobs && lastSnapshot.Jobs.length > 0) ? lastSnapshot.Jobs[0] : {});
-    
-    const cardId = `card-${idx}`;
-    const historyId = `history-${idx}`;
-    const chartId = `person-trend-${idx}`;
-    const attrName = name.replace(/"/g, '&quot;');
-    const totalPay = person._totalPay || 0;
-    const totalPayLabel = person._payMissing
-        ? (totalPay > 0 ? `${formatMoney(totalPay)}*` : 'Pay missing')
-        : formatMoney(totalPay);
-    const totalPayTooltip = person._payMissing
-        ? 'Total calculated from available rates. One or more appointments list only a term (e.g., 9 or 12 months) with no salary rate in the report.'
-        : 'Total calculated from all active appointments';
-    const reversedTimeline = person.Timeline.slice().reverse();
+function buildHistoryHTML(person, chartId) {
+    if (!person || !person.Timeline || person.Timeline.length === 0) {
+        return `<div class="history-loading">No detailed history available.</div>`;
+    }
 
-    const isLatest = isPersonActive(person);
-    
-    const badgeHTML = !isLatest ? `<span class="badge" style="background:#ef4444; color:white; margin-left:10px;">FORMER / INACTIVE</span>` : '';
-    const colaTooltip = (person._colaMissedLabels && person._colaMissedLabels.length > 0)
-        ? `Possible COLA not received (${person._colaMissedLabels.join(', ')})`
-        : 'Possible COLA not received for listed events.';
-    const colaWarningHTML = (!person._isUnclass && person._colaMissing)
-        ? `<span class="cola-warning" data-tooltip="${colaTooltip}">!</span>`
-        : '';
+    const reversedTimeline = person.Timeline.slice().reverse();
     const reportHistoryHTML = person.Timeline.map(snap => `<span class="badge badge-source" style="margin-right:4px; margin-bottom:4px;">${snap.Date}</span>`).join('');
     const recordGaps = getRecordGaps(person);
     const recordGapHTML = recordGaps.length
@@ -1282,22 +1159,6 @@ function generateCardHTML(name, idx) {
         : '';
 
     return `
-    <div class="card" id="${cardId}" data-name="${attrName}" style="${!isLatest ? 'opacity: 0.8;' : ''}">
-        <div class="card-header" onclick="toggleCard('${cardId}')" onkeydown="handleCardKey(event, '${cardId}')" tabindex="0" role="button" aria-expanded="false" aria-controls="${historyId}">
-            <div class="person-info">
-                <div class="name-header">
-                    <h2>${name} ${badgeHTML} ${colaWarningHTML}</h2>
-                    <button class="link-btn-card" data-linkname="${attrName}" onclick="copyLink(event, this.dataset.linkname)" aria-label="Copy link">🔗</button>
-                </div>
-                <p>Home Org: ${person.Meta["Home Orgn"] || 'N/A'}</p>
-            </div>
-            <div class="latest-stat">
-                <div class="latest-salary" data-tooltip="${totalPayTooltip}">${totalPayLabel}</div>
-                <div class="latest-role">${lastJob['Job Title'] || 'Unknown'}</div>
-            </div>
-        </div>
-
-        <div id="${historyId}" class="history" role="region" aria-label="Job History">
             <div class="history-meta" style="margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #444; font-size: 0.9rem; color: #a0a0a0;">
                 <strong>Hired:</strong> ${formatDate(person.Meta["First Hired"])} &nbsp;&bull;&nbsp;
                 <strong>Adj Service:</strong> ${formatDate(person.Meta["Adj Service Date"])}
@@ -1361,8 +1222,87 @@ function generateCardHTML(name, idx) {
                     </table>
                 </div>
             </div>
+    `;
+}
+
+function generateCardHTML(name, idx) {
+    const person = state.masterData[name];
+    if (!person._hasTimeline) return '';
+    
+    const lastJob = person._lastJob || {};
+    
+    const cardId = `card-${idx}`;
+    const historyId = `history-${idx}`;
+    const chartId = `person-trend-${idx}`;
+    const attrName = name.replace(/"/g, '&quot;');
+    const totalPay = person._totalPay || 0;
+    const totalPayLabel = person._payMissing
+        ? (totalPay > 0 ? `${formatMoney(totalPay)}*` : 'Pay missing')
+        : formatMoney(totalPay);
+    const totalPayTooltip = person._payMissing
+        ? 'Total calculated from available rates. One or more appointments list only a term (e.g., 9 or 12 months) with no salary rate in the report.'
+        : 'Total calculated from all active appointments';
+    const isLatest = isPersonActive(person);
+    
+    const badgeHTML = !isLatest ? `<span class="badge" style="background:#ef4444; color:white; margin-left:10px;">FORMER / INACTIVE</span>` : '';
+    const colaTooltip = (person._colaMissedLabels && person._colaMissedLabels.length > 0)
+        ? `Possible COLA not received (${person._colaMissedLabels.join(', ')})`
+        : 'Possible COLA not received for listed events.';
+    const colaWarningHTML = (!person._isUnclass && person._colaMissing)
+        ? `<span class="cola-warning" data-tooltip="${colaTooltip}">!</span>`
+        : '';
+
+    return `
+    <div class="card" id="${cardId}" data-name="${attrName}" data-chart-id="${chartId}" style="${!isLatest ? 'opacity: 0.8;' : ''}">
+        <div class="card-header" onclick="toggleCard('${cardId}')" onkeydown="handleCardKey(event, '${cardId}')" tabindex="0" role="button" aria-expanded="false" aria-controls="${historyId}">
+            <div class="person-info">
+                <div class="name-header">
+                    <h2>${name} ${badgeHTML} ${colaWarningHTML}</h2>
+                    <button class="link-btn-card" data-linkname="${attrName}" onclick="copyLink(event, this.dataset.linkname)" aria-label="Copy link">🔗</button>
+                </div>
+                <p>Home Org: ${person.Meta["Home Orgn"] || 'N/A'}</p>
+            </div>
+            <div class="latest-stat">
+                <div class="latest-salary" data-tooltip="${totalPayTooltip}">${totalPayLabel}</div>
+                <div class="latest-role">${lastJob['Job Title'] || 'Unknown'}</div>
+            </div>
+        </div>
+
+        <div id="${historyId}" class="history" role="region" aria-label="Job History" data-loaded="false">
+            <div class="history-loading">Expand to load details...</div>
         </div>
     </div>`;
+}
+
+function loadAndRenderPersonDetails(cardEl) {
+    if (!cardEl) return Promise.resolve(null);
+    const historyEl = cardEl.querySelector('.history');
+    if (!historyEl) return Promise.resolve(null);
+    if (historyEl.dataset.loaded === 'true') {
+        const name = cardEl.getAttribute('data-name');
+        return Promise.resolve(state.detailCache[name] || null);
+    }
+    historyEl.innerHTML = `<div class="history-loading">Loading details...</div>`;
+
+    const name = cardEl.getAttribute('data-name');
+    return loadPersonDetail(name)
+        .then(person => {
+            if (!person) {
+                historyEl.innerHTML = `<div class="history-loading">No details available.</div>`;
+                historyEl.dataset.loaded = 'true';
+                return null;
+            }
+            const chartId = cardEl.dataset.chartId;
+            historyEl.innerHTML = buildHistoryHTML(person, chartId);
+            historyEl.dataset.loaded = 'true';
+            if (hasInflationData()) refreshInflationControls();
+            return person;
+        })
+        .catch(err => {
+            historyEl.innerHTML = `<div class="history-loading">Error loading details.</div>`;
+            console.error(err);
+            return null;
+        });
 }
 
 // ==========================================
@@ -1395,10 +1335,18 @@ function toggleCard(id) {
     el.classList.toggle('expanded');
     const expanded = el.classList.contains('expanded');
     el.querySelector('.card-header')?.setAttribute('aria-expanded', expanded);
-    if (expanded) ensurePersonChart(el);
+    if (expanded) {
+        loadAndRenderPersonDetails(el).then(() => ensurePersonChart(el));
+    }
 }
 
 function rebuildPersonChart(cardEl) {
+    if (!cardEl) return;
+    const name = cardEl.getAttribute('data-name');
+    if (!state.detailCache[name]) {
+        loadAndRenderPersonDetails(cardEl).then(() => ensurePersonChart(cardEl));
+        return;
+    }
     const canvas = cardEl.querySelector('canvas[data-person-chart="true"]');
     if (!canvas) return;
     const chartId = canvas.id;
@@ -1521,7 +1469,7 @@ function autoExpandTarget(name) {
     const card = document.querySelector(`.card[data-name="${name.replace(/"/g, '\\"')}"]`);
     if (card) {
         card.classList.add('expanded');
-        ensurePersonChart(card);
+        loadAndRenderPersonDetails(card).then(() => ensurePersonChart(card));
         setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
     }
 }
