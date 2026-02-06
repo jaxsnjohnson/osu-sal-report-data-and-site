@@ -163,6 +163,55 @@ const hydratePersonDetail = (person) => {
     person._hydrated = true;
 };
 
+// Compute the first classified -> unclassified transition timestamp for a person, if any.
+const getExclusionTransitionTs = (person) => {
+    if (!person || !person._wasExcluded || !person.Timeline || person.Timeline.length < 2) return null;
+    // Ensure timeline is sorted by date ascending (hydratePersonDetail already sorts)
+    const timeline = person.Timeline;
+    let sawClassified = false;
+    for (let i = 0; i < timeline.length; i++) {
+        const snap = timeline[i];
+        const src = (snap.Source || '').toLowerCase();
+        const isUnclass = src.includes('unclass');
+        const isClassified = src.includes('class') && !isUnclass;
+        if (isClassified) sawClassified = true;
+        if (isUnclass && sawClassified) {
+            const ts = new Date(snap.Date).getTime();
+            return isNaN(ts) ? null : ts;
+        }
+    }
+    return null;
+};
+
+// Load exclusion transition timestamps for all excluded people (uses detail buckets lazily).
+const computeExclusionTransitions = () => {
+    if (state.exclusionTransitionsReady) return Promise.resolve();
+
+    const excludedKeys = state.masterKeys.filter(name => {
+        const p = state.masterData[name];
+        return p && p._wasExcluded;
+    });
+
+    const tasks = excludedKeys.map(name =>
+        loadPersonDetail(name).then(person => {
+            if (!person) return;
+            if (person._exclusionDate) {
+                const tsPre = new Date(person._exclusionDate).getTime();
+                if (!isNaN(tsPre)) {
+                    state.exclusionTransitionMap[name] = tsPre;
+                    return;
+                }
+            }
+            const ts = getExclusionTransitionTs(person);
+            if (ts) state.exclusionTransitionMap[name] = ts;
+        })
+    );
+
+    return Promise.all(tasks).then(() => {
+        state.exclusionTransitionsReady = true;
+    });
+};
+
 const loadPersonDetail = (name) => {
     if (state.detailCache[name]) return Promise.resolve(state.detailCache[name]);
     const bucket = bucketForName(name);
@@ -171,6 +220,14 @@ const loadPersonDetail = (name) => {
         if (!person) {
             state.detailCache[name] = null;
             return null;
+        }
+        // Bring over flags that are stored in masterData but absent in bucket files.
+        const masterPerson = state.masterData[name];
+        if (masterPerson && masterPerson._wasExcluded !== undefined) {
+            person._wasExcluded = masterPerson._wasExcluded;
+        }
+        if (masterPerson && masterPerson._exclusionDate !== undefined) {
+            person._exclusionDate = masterPerson._exclusionDate;
         }
         hydratePersonDetail(person);
         state.detailCache[name] = person;
@@ -414,6 +471,8 @@ const state = {
     searchIndex: [],
     focusIndex: -1,
     historicalChartsRendered: false,
+    exclusionTransitionMap: {},
+    exclusionTransitionsReady: false,
     filters: {
         text: '',
         type: 'all',
@@ -424,7 +483,7 @@ const state = {
         sort: 'name-asc',   // Default sort: A-Z
         fullTimeOnly: false, // Default: Show all FTEs
         dataFlagsOnly: false,
-        excludedOnly: false
+        exclusionsMode: 'off' // off | all | recent
     }
 };
 
@@ -441,7 +500,7 @@ const els = {
     dataFlagsToggle: document.getElementById('data-flags-toggle'),
     advancedToggle: document.getElementById('advanced-toggle'),
     advancedSearch: document.getElementById('advanced-search'),
-    exclusionsToggle: document.getElementById('exclusions-toggle'),
+    exclusionsMode: document.getElementById('exclusions-mode'),
     suggestedSearches: document.getElementById('suggested-searches'),
     results: document.getElementById('results'),
     stats: document.getElementById('stats-bar'),
@@ -477,6 +536,19 @@ Promise.all([
         state.historyStats = aggregates.historyStats || [];
         state.classTransitions = aggregates.classTransitions || [];
         state.peerMedianMap = aggregates.peerMedianMap || {};
+
+        // Preload exclusion transition map when dates are already present in index.
+        state.exclusionTransitionMap = {};
+        state.masterKeys.forEach(name => {
+            const p = indexData[name];
+            if (p && p._exclusionDate) {
+                const ts = new Date(p._exclusionDate).getTime();
+                if (!isNaN(ts)) state.exclusionTransitionMap[name] = ts;
+            }
+        });
+        if (Object.keys(state.exclusionTransitionMap).length) {
+            state.exclusionTransitionsReady = true;
+        }
 
         state.masterKeys.forEach(name => {
             const p = state.masterData[name];
@@ -1153,9 +1225,15 @@ window.applySearch = function(term) {
 };
 
 function runSearch() {
+    // If user asked for recent exclusions but transition map not ready, compute then rerun.
+    if (state.filters.exclusionsMode === 'recent' && !state.exclusionTransitionsReady) {
+        computeExclusionTransitions().then(() => runSearch());
+        return;
+    }
+
     const term = state.filters.text.toLowerCase();
     const roleFilter = state.filters.role.toLowerCase();
-    const { minSalary, maxSalary, sort, dataFlagsOnly, excludedOnly } = state.filters;
+    const { minSalary, maxSalary, sort, dataFlagsOnly, exclusionsMode } = state.filters;
 
     // 1. FILTERING
     const baseKeys = getBaseKeys();
@@ -1184,8 +1262,18 @@ function runSearch() {
         }
 
         // Exclusions filter (classified -> unclassified at any point)
-        if (excludedOnly) {
+        if (exclusionsMode !== 'off') {
             if (!person._wasExcluded) return false;
+            if (exclusionsMode === 'recent') {
+                const cutoff = Date.now() - (365 * 24 * 60 * 60 * 1000);
+                let ts = null;
+                if (person._exclusionDate) {
+                    ts = new Date(person._exclusionDate).getTime();
+                } else if (state.exclusionTransitionMap[name]) {
+                    ts = state.exclusionTransitionMap[name];
+                }
+                if (!ts || ts < cutoff) return false;
+            }
         }
         return true;
     });
@@ -1681,7 +1769,12 @@ els.inactiveToggle.addEventListener('change', (e) => { state.filters.showInactiv
 els.sortSelect.addEventListener('change', (e) => { state.filters.sort = e.target.value; runSearch(); });
 els.fteToggle.addEventListener('change', (e) => { state.filters.fullTimeOnly = e.target.checked; runSearch(); });
 els.dataFlagsToggle.addEventListener('change', (e) => { state.filters.dataFlagsOnly = e.target.checked; runSearch(); });
-els.exclusionsToggle.addEventListener('change', (e) => { state.filters.excludedOnly = e.target.checked; runSearch(); });
+if (els.exclusionsMode) {
+    els.exclusionsMode.addEventListener('change', (e) => {
+        state.filters.exclusionsMode = e.target.value;
+        runSearch();
+    });
+}
 
 function isTypingTarget(target) {
     if (!target) return false;
