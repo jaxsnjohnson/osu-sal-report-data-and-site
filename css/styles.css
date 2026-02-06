@@ -521,6 +521,13 @@ td { padding: 12px 0; border-bottom: 1px solid var(--border); vertical-align: to
 
 .date-cell { width: 140px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .money-cell { font-family: monospace; font-weight: 600; color: var(--text-main); }
+.hourly-rate {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-muted);
+}
 
 /* Diff Styles */
 .diff-val {
