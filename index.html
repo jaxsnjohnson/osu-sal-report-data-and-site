@@ -146,54 +146,80 @@
 
         <hr class="section-divider">
 
+        <div class="section-header">
+            <div class="section-title">Historical Trends</div>
+            <button type="button" id="historical-toggle" class="section-toggle" aria-expanded="false">
+                Show historical charts
+            </button>
+        </div>
+        <div id="historical-charts" class="collapsible hidden" aria-hidden="true">
+            <div id="historical-charts-container" class="dashboard historical-grid"></div>
+        </div>
+
         <div class="search-container">
             <div class="search-wrapper">
-                <input type="text" id="search" class="search-bar" placeholder="Search name, org... (Ctrl+F)" aria-label="Search personnel">
+                <input type="text" id="search" class="search-bar" placeholder="Search name, org... (/)" aria-label="Search personnel">
                 <button id="clear-search" class="clear-btn hidden" aria-label="Clear search" tabindex="-1">&times;</button>
             </div>
+            <button type="button" id="advanced-toggle" class="advanced-toggle" aria-expanded="false">
+                Advanced
+            </button>
             <div id="suggested-searches" class="chip-container"></div>
 
-            <div style="display: flex; gap: 10px; width: 100%; flex-wrap: wrap; align-items: stretch;">
-                <div class="salary-inputs">
-                    <input type="number" id="salary-min" class="filter-input" placeholder="Min Salary" aria-label="Minimum salary">
-                    <input type="number" id="salary-max" class="filter-input" placeholder="Max Salary" aria-label="Maximum salary">
+            <div id="advanced-search" class="advanced-search hidden">
+                <div style="display: flex; gap: 10px; width: 100%; flex-wrap: wrap; align-items: stretch;">
+                    <div class="salary-inputs">
+                        <input type="number" id="salary-min" class="filter-input" placeholder="Min Salary" aria-label="Minimum salary">
+                        <input type="number" id="salary-max" class="filter-input" placeholder="Max Salary" aria-label="Maximum salary">
+                    </div>
+                    
+                    <select id="sort-order" class="filter-select" aria-label="Sort results" style="flex: 1; min-width: 160px;">
+                        <option value="name-asc">Name (A-Z)</option>
+                        <option value="name-desc">Name (Z-A)</option>
+                        <option value="salary-desc">Highest Salary</option>
+                        <option value="salary-asc">Lowest Salary</option>
+                        <option value="tenure-desc">Longest Tenure</option>
+                        <option value="tenure-asc">Newest Hires</option>
+                    </select>
+                </div>
+
+                <div style="display: flex; gap: 10px; width: 100%; flex-wrap: wrap;">
+                    <select id="type-filter" class="filter-select" aria-label="Filter by classification type" style="flex: 1; min-width: 150px;">
+                        <option value="all">All Types</option>
+                        <option value="classified">Classified</option>
+                        <option value="unclassified">Unclassified</option>
+                    </select>
+
+                    <input type="text" id="role-filter" class="filter-input" list="role-list" placeholder="Filter by Role..." aria-label="Filter by job role" style="flex: 2; min-width: 200px;">
+                    <datalist id="role-list"></datalist>
                 </div>
                 
-                <select id="sort-order" class="filter-select" aria-label="Sort results" style="flex: 1; min-width: 160px;">
-                    <option value="name-asc">Name (A-Z)</option>
-                    <option value="name-desc">Name (Z-A)</option>
-                    <option value="salary-desc">Highest Salary</option>
-                    <option value="salary-asc">Lowest Salary</option>
-                    <option value="tenure-desc">Longest Tenure</option>
-                    <option value="tenure-asc">Newest Hires</option>
-                </select>
-            </div>
+                <div style="display: flex; gap: 10px; width: 100%; flex-wrap: wrap;">
+                    <label class="toggle-container" style="display: flex; align-items: center; cursor: pointer; user-select: none; background: #333; padding: 12px 15px; border-radius: 12px; border: 1px solid var(--border); color: var(--text-muted); font-size: 0.9rem; flex: 1; justify-content: center; min-width: 200px;" data-tooltip="Include people not present in the latest report snapshot.">
+                        <input type="checkbox" id="show-inactive" style="margin-right: 8px;">
+                        Show Former/Inactive
+                    </label>
 
-            <div style="display: flex; gap: 10px; width: 100%; flex-wrap: wrap;">
-                <select id="type-filter" class="filter-select" aria-label="Filter by classification type" style="flex: 1; min-width: 150px;">
-                    <option value="all">All Types</option>
-                    <option value="classified">Classified</option>
-                    <option value="unclassified">Unclassified</option>
-                </select>
-
-                <input type="text" id="role-filter" class="filter-input" list="role-list" placeholder="Filter by Role..." aria-label="Filter by job role" style="flex: 2; min-width: 200px;">
-                <datalist id="role-list"></datalist>
-            </div>
-            
-            <div style="display: flex; gap: 10px; width: 100%; flex-wrap: wrap;">
-                <label class="toggle-container" style="display: flex; align-items: center; cursor: pointer; user-select: none; background: #333; padding: 12px 15px; border-radius: 12px; border: 1px solid var(--border); color: var(--text-muted); font-size: 0.9rem; flex: 1; justify-content: center; min-width: 200px;">
-                    <input type="checkbox" id="show-inactive" style="margin-right: 8px;">
-                    Show Former/Inactive
-                </label>
-
-                <label class="toggle-container" style="display: flex; align-items: center; cursor: pointer; user-select: none; background: #333; padding: 12px 15px; border-radius: 12px; border: 1px solid var(--border); color: var(--text-muted); font-size: 0.9rem; flex: 1; justify-content: center; min-width: 200px;">
-                    <input type="checkbox" id="fte-toggle" style="margin-right: 8px;">
-                    Full-Time Only (1.0 FTE)
-                </label>
+                    <label class="toggle-container" style="display: flex; align-items: center; cursor: pointer; user-select: none; background: #333; padding: 12px 15px; border-radius: 12px; border: 1px solid var(--border); color: var(--text-muted); font-size: 0.9rem; flex: 1; justify-content: center; min-width: 200px;" data-tooltip="Only show 1.0 FTE appointments (>= 100% Appt Percent).">
+                        <input type="checkbox" id="fte-toggle" style="margin-right: 8px;">
+                        Full-Time Only (1.0 FTE)
+                    </label>
+                </div>
+                <div style="display: flex; gap: 10px; width: 100%; flex-wrap: wrap;">
+                    <label class="toggle-container" data-tooltip="Only show records with one or more data quality flags.">
+                        <input type="checkbox" id="data-flags-toggle" style="margin-right: 8px;">
+                        Data Flags Only
+                    </label>
+                    <label class="toggle-container exclusions-toggle" data-tooltip="Show those who were offered or moved out of a classified SEIU 503 represented position.">
+                        <input type="checkbox" id="exclusions-toggle" style="margin-right: 8px;">
+                        Show Those Excluded
+                    </label>
+                </div>
             </div>
 
         </div>
         <div class="stats" id="stats-bar">Loading data...</div>
+        <div id="search-suggestions" class="search-suggestions hidden"></div>
     </div>
 
     <div id="results"></div>
@@ -230,6 +256,16 @@
                 <strong>Note:</strong> This dataset generally does not include bonuses, per diem, or student employees.
                 Name changes may not be tracked across different reports. Always refer to official documentation for official purposes.
             </p>
+        </div>
+
+        <div class="modal-section">
+            <h3>Methodology</h3>
+            <ul>
+                <li>PDF salary reports are converted to text, then parsed using deterministic rules.</li>
+                <li>Classification is inferred from the report source (classified vs unclassified).</li>
+                <li>Totals are computed from Annual Salary Rate × Appt Percent (FTE).</li>
+                <li>Yearly transition counts are based on changes between consecutive snapshots.</li>
+            </ul>
         </div>
 
         <div class="modal-section">
@@ -296,6 +332,26 @@
                 <a href="https://github.com/jaxsnjohnson/osu-sal-report-data-and-site" target="_blank" class="link-btn">View on GitHub</a>
                 <a href="https://ko-fi.com/X8X7K6PDV" target="_blank" class="link-btn kofi-btn">Support me on Ko-fi</a>
             </p>
+        </div>
+
+        <div class="modal-section">
+            <h3>Corrections</h3>
+            <p>
+                See a mistake in a record? File a correction request and include the report date and the exact field.
+                <br>
+                <a href="https://github.com/jaxsnjohnson/osu-sal-report-data-and-site/issues/new?title=Data%20correction%20request&body=Person%3A%20%0AReport%20date%3A%20%0AField%3A%20%0AObserved%20value%3A%20%0AExpected%20value%3A%20%0ASource%20link%20or%20notes%3A%20" target="_blank" class="link-btn">Report a Data Issue</a>
+            </p>
+        </div>
+
+        <div class="modal-section">
+            <h3 id="hotkeys-section">Keyboard Shortcuts</h3>
+            <ul>
+                <li><strong>/</strong> Focus search</li>
+                <li><strong>Esc</strong> Clear search / close modal</li>
+                <li><strong>J / K</strong> or <strong>↑ / ↓</strong> Navigate results</li>
+                <li><strong>Enter</strong> Toggle a focused result</li>
+                <li><strong>?</strong> Open this panel</li>
+            </ul>
         </div>
 
         <p class="modal-footer">A project by Jax SN Johnson</p>
