@@ -114,6 +114,7 @@ def main():
     snapshot_dates = set()
     stats_map = {}
     peer_buckets = defaultdict(lambda: defaultdict(list))
+    class_transitions = {}
 
     latest_class_date = ""
     latest_unclass_date = ""
@@ -135,10 +136,29 @@ def main():
         is_unclass = False
         last_date = last_snap.get("Date") if last_snap else None
 
+        prev_is_unclass = None
+        was_excluded = False
         for idx, snap in enumerate(timeline):
             date = snap.get("Date")
             if date:
                 snapshot_dates.add(date)
+
+            src = (snap.get("Source") or "").lower()
+            is_unclass = "unclass" in src
+            if prev_is_unclass is not None and (not prev_is_unclass) and is_unclass:
+                was_excluded = True
+            if prev_is_unclass is not None and is_unclass != prev_is_unclass and date:
+                year = date[:4]
+                if year:
+                    entry = class_transitions.setdefault(year, {
+                        "year": year,
+                        "toUnclassified": 0,
+                        "toClassified": 0
+                    })
+                    if is_unclass:
+                        entry["toUnclassified"] += 1
+                    else:
+                        entry["toClassified"] += 1
 
             jobs = snap.get("Jobs") or []
             for job in jobs:
@@ -154,13 +174,21 @@ def main():
             # stats + peer buckets
             if date:
                 if date not in stats_map:
-                    stats_map[date] = {"date": date, "classified": 0, "unclassified": 0, "payroll": 0.0}
+                    stats_map[date] = {
+                        "date": date,
+                        "classified": 0,
+                        "unclassified": 0,
+                        "payroll": 0.0,
+                        "payrollClassified": 0.0,
+                        "payrollUnclassified": 0.0,
+                    }
                 stats_map[date]["payroll"] += snap_pay
-                src = (snap.get("Source") or "").lower()
                 if "unclass" in src:
                     stats_map[date]["unclassified"] += 1
+                    stats_map[date]["payrollUnclassified"] += snap_pay
                 else:
                     stats_map[date]["classified"] += 1
+                    stats_map[date]["payrollClassified"] += snap_pay
 
                 primary_job = jobs[0] if jobs else None
                 if primary_job:
@@ -179,6 +207,8 @@ def main():
                     if pct >= 100:
                         is_full_time = True
                         break
+
+            prev_is_unclass = is_unclass
 
         if last_snap:
             last_src = (last_snap.get("Source") or "").lower()
@@ -217,6 +247,7 @@ def main():
             "_colaChecked": 0,
             "_colaMissedLabels": [],
             "_colaMissing": False,
+            "_wasExcluded": was_excluded,
         }
 
         bucket = bucket_for_name(name)
@@ -311,12 +342,14 @@ def main():
 
     history_stats = sorted(stats_map.values(), key=lambda x: x["date"])
     snapshot_dates_sorted = sorted(snapshot_dates)
+    class_transitions_sorted = sorted(class_transitions.values(), key=lambda x: x["year"])
 
     aggregates = {
         "latestClassDate": latest_class_date,
         "latestUnclassDate": latest_unclass_date,
         "snapshotDates": snapshot_dates_sorted,
         "historyStats": history_stats,
+        "classTransitions": class_transitions_sorted,
         "peerMedianMap": peer_median_map,
         "allRoles": sorted(all_roles),
     }

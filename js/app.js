@@ -48,6 +48,16 @@ const formatDate = (dateStr) => {
     return dateStr;
 };
 
+const escapeForSingleQuote = (value) => {
+    if (value === null || value === undefined) return '';
+    return value.toString().replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+};
+
+const escapeHtmlAttr = (value) => {
+    if (value === null || value === undefined) return '';
+    return value.toString().replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+};
+
 const calculateSnapshotPay = (snapshot) => {
     if (!snapshot || !snapshot.Jobs) return 0;
     let total = 0;
@@ -166,6 +176,83 @@ const loadPersonDetail = (name) => {
         state.detailCache[name] = person;
         return person;
     });
+};
+
+const buildSearchIndex = (names, roles) => {
+    const seen = new Set();
+    const index = [];
+    const addItem = (value, type) => {
+        if (!value) return;
+        const key = value.toLowerCase();
+        if (seen.has(`${type}:${key}`)) return;
+        seen.add(`${type}:${key}`);
+        const tokens = key.split(/[^a-z0-9]+/).filter(Boolean);
+        index.push({ value, key, type, tokens });
+    };
+    names.forEach(name => addItem(name, 'name'));
+    roles.forEach(role => addItem(role, 'role'));
+    return index;
+};
+
+const boundedEditDistance = (a, b, maxDist) => {
+    const alen = a.length;
+    const blen = b.length;
+    if (Math.abs(alen - blen) > maxDist) return maxDist + 1;
+    let prev = new Array(blen + 1);
+    for (let j = 0; j <= blen; j++) prev[j] = j;
+    for (let i = 1; i <= alen; i++) {
+        const cur = [i];
+        let rowMin = cur[0];
+        for (let j = 1; j <= blen; j++) {
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            cur[j] = Math.min(
+                prev[j] + 1,
+                cur[j - 1] + 1,
+                prev[j - 1] + cost
+            );
+            if (cur[j] < rowMin) rowMin = cur[j];
+        }
+        if (rowMin > maxDist) return maxDist + 1;
+        prev = cur;
+    }
+    return prev[blen];
+};
+
+const getSearchSuggestions = (term, limit = 6) => {
+    const query = term.trim().toLowerCase();
+    if (!query || query.length < 3) return [];
+    const maxDist = query.length <= 4 ? 1 : (query.length <= 6 ? 2 : 3);
+    const scored = [];
+    for (const item of state.searchIndex) {
+        const key = item.key;
+        let score = null;
+        if (key.startsWith(query)) {
+            score = 0;
+        } else if (key.includes(query)) {
+            score = 1;
+        } else {
+            let bestDist = maxDist + 1;
+            for (const token of item.tokens) {
+                if (token.length < 3) continue;
+                const dist = boundedEditDistance(query, token, maxDist);
+                if (dist < bestDist) bestDist = dist;
+                if (bestDist === 0) break;
+            }
+            if (bestDist <= maxDist) score = 2 + bestDist;
+        }
+        if (score !== null) scored.push({ score, value: item.value, type: item.type });
+    }
+    scored.sort((a, b) => (a.score - b.score) || (a.value.length - b.value.length));
+    const results = [];
+    const seen = new Set();
+    for (const item of scored) {
+        const key = item.value.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        results.push(item);
+        if (results.length >= limit) break;
+    }
+    return results;
 };
 
 const medianOf = (arr) => {
@@ -314,6 +401,7 @@ const state = {
     visibleCount: 50,
     batchSize: 50,
     historyStats: [],
+    classTransitions: [],
     latestClassDate: "",
     latestUnclassDate: "",
     snapshotDates: [],
@@ -323,6 +411,9 @@ const state = {
     detailCache: {},
     bucketCache: {},
     bucketPromises: {},
+    searchIndex: [],
+    focusIndex: -1,
+    historicalChartsRendered: false,
     filters: {
         text: '',
         type: 'all',
@@ -331,7 +422,9 @@ const state = {
         maxSalary: null,
         showInactive: false,
         sort: 'name-asc',   // Default sort: A-Z
-        fullTimeOnly: false // Default: Show all FTEs
+        fullTimeOnly: false, // Default: Show all FTEs
+        dataFlagsOnly: false,
+        excludedOnly: false
     }
 };
 
@@ -345,6 +438,10 @@ const els = {
     inactiveToggle: document.getElementById('show-inactive'),
     sortSelect: document.getElementById('sort-order'),
     fteToggle: document.getElementById('fte-toggle'),
+    dataFlagsToggle: document.getElementById('data-flags-toggle'),
+    advancedToggle: document.getElementById('advanced-toggle'),
+    advancedSearch: document.getElementById('advanced-search'),
+    exclusionsToggle: document.getElementById('exclusions-toggle'),
     suggestedSearches: document.getElementById('suggested-searches'),
     results: document.getElementById('results'),
     stats: document.getElementById('stats-bar'),
@@ -378,6 +475,7 @@ Promise.all([
         state.latestUnclassDate = aggregates.latestUnclassDate || "";
         state.snapshotDates = aggregates.snapshotDates || [];
         state.historyStats = aggregates.historyStats || [];
+        state.classTransitions = aggregates.classTransitions || [];
         state.peerMedianMap = aggregates.peerMedianMap || {};
 
         state.masterKeys.forEach(name => {
@@ -395,6 +493,7 @@ Promise.all([
         // Populate Roles
         const roles = aggregates.allRoles || [];
         els.roleDatalist.innerHTML = roles.map(r => `<option value="${r}">`).join('');
+        state.searchIndex = buildSearchIndex(state.masterKeys, roles);
 
         renderSuggestedSearches();
 
@@ -403,9 +502,7 @@ Promise.all([
         updateStats();
         setupInfiniteScroll();
 
-        setTimeout(() => {
-            renderInteractiveCharts(state.historyStats);
-        }, 0);
+        setupHistoricalChartsToggle();
 
         inflationReady.then(() => {
             refreshInflationControls();
@@ -417,6 +514,7 @@ Promise.all([
         }
 
         setupTooltips();
+        setupAdvancedSearchToggle();
     })
     .catch(err => {
         els.stats.innerHTML = "Error loading data files.";
@@ -431,14 +529,7 @@ function renderInteractiveCharts(history) {
     if (typeof Chart === 'undefined') return;
 
     let container = document.getElementById('historical-charts-container');
-    if (!container) {
-        container = document.createElement('div');
-        container.id = 'historical-charts-container';
-        
-        container.style.display = 'contents';
-        
-        els.dashboard.appendChild(container);
-    }
+    if (!container) return;
 
     const warningBox = `
         <div style="background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.3); color: #facc15; padding: 10px; border-radius: 6px; font-size: 0.8rem; margin-bottom: 15px; display: flex; align-items: flex-start; gap: 8px; line-height: 1.4;">
@@ -460,6 +551,25 @@ function renderInteractiveCharts(history) {
             ${warningBox}
              <div style="height: 300px; position: relative;">
                 <canvas id="chart-payroll"></canvas>
+            </div>
+        </div>
+        <div class="stat-card wide">
+            <div class="stat-label help-cursor" data-tooltip="Counts a transition when a person switches classification between consecutive snapshots. Year reflects the later snapshot.">
+                Classification Transitions
+            </div>
+            ${warningBox}
+            <div style="height: 260px; position: relative;">
+                <canvas id="chart-transitions"></canvas>
+            </div>
+            <div class="stat-sub">Classified → Unclassified (exclusions) and the reverse.</div>
+        </div>
+        <div class="stat-card wide" id="exclusions-list-card">
+            <div class="stat-label help-cursor" data-tooltip="Average total pay per person in each snapshot.">
+                Avg Pay Per Person
+            </div>
+            ${warningBox}
+            <div style="height: 260px; position: relative;">
+                <canvas id="chart-per-capita"></canvas>
             </div>
         </div>
     `;
@@ -530,6 +640,79 @@ function renderInteractiveCharts(history) {
                 }
             }
         }
+    });
+
+    const transitions = state.classTransitions || [];
+    if (transitions.length) {
+        new Chart(document.getElementById('chart-transitions').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: transitions.map(d => d.year),
+                datasets: [
+                    {
+                        label: 'Classified → Unclassified',
+                        data: transitions.map(d => d.toUnclassified || 0),
+                        backgroundColor: '#f97316'
+                    },
+                    {
+                        label: 'Unclassified → Classified',
+                        data: transitions.map(d => d.toClassified || 0),
+                        backgroundColor: '#8b5cf6'
+                    }
+                ]
+            },
+            options: commonOptions
+        });
+    }
+
+    const perCapitaAll = history.map(d => {
+        const count = (d.classified || 0) + (d.unclassified || 0);
+        return count > 0 ? d.payroll / count : 0;
+    });
+    const perCapitaClassified = history.map(d => {
+        const count = d.classified || 0;
+        return count > 0 ? (d.payrollClassified || 0) / count : 0;
+    });
+    const perCapitaUnclassified = history.map(d => {
+        const count = d.unclassified || 0;
+        return count > 0 ? (d.payrollUnclassified || 0) / count : 0;
+    });
+    new Chart(document.getElementById('chart-per-capita').getContext('2d'), {
+        type: 'line',
+        data: {
+            labels: history.map(d => d.date),
+            datasets: [
+                {
+                    label: 'All',
+                    data: perCapitaAll,
+                    borderColor: '#60a5fa',
+                    backgroundColor: 'rgba(96, 165, 250, 0.12)',
+                    fill: true,
+                    tension: 0.3
+                },
+                {
+                    label: 'Classified',
+                    data: perCapitaClassified,
+                    borderColor: '#8b5cf6',
+                    backgroundColor: 'rgba(139, 92, 246, 0.08)',
+                    fill: false,
+                    tension: 0.3
+                },
+                {
+                    label: 'Unclassified',
+                    data: perCapitaUnclassified,
+                    borderColor: '#f97316',
+                    backgroundColor: 'rgba(249, 115, 22, 0.08)',
+                    fill: false,
+                    tension: 0.3
+                }
+            ]
+        },
+        options: getChartOptions({
+            yTickCallback: (value) => formatMoney(value),
+            animation: false,
+            xTickLimit: 6
+        })
     });
 }
 
@@ -972,7 +1155,7 @@ window.applySearch = function(term) {
 function runSearch() {
     const term = state.filters.text.toLowerCase();
     const roleFilter = state.filters.role.toLowerCase();
-    const { minSalary, maxSalary, sort } = state.filters;
+    const { minSalary, maxSalary, sort, dataFlagsOnly, excludedOnly } = state.filters;
 
     // 1. FILTERING
     const baseKeys = getBaseKeys();
@@ -992,6 +1175,17 @@ function runSearch() {
             const salary = person._totalPay;
             if (minSalary !== null && salary < minSalary) return false;
             if (maxSalary !== null && salary > maxSalary) return false;
+        }
+
+        // Data Flags filter
+        if (dataFlagsOnly) {
+            const hasFlags = !!(person._payMissing || person._colaMissing);
+            if (!hasFlags) return false;
+        }
+
+        // Exclusions filter (classified -> unclassified at any point)
+        if (excludedOnly) {
+            if (!person._wasExcluded) return false;
         }
         return true;
     });
@@ -1020,9 +1214,37 @@ function runSearch() {
 
     state.filteredKeys = results;
     state.visibleCount = state.batchSize;
+    state.focusIndex = -1;
     renderInitial();
     updateStats();
     updateDashboard(calculateStats(state.filteredKeys));
+    updateSearchSuggestions();
+}
+
+function updateSearchSuggestions() {
+    const container = document.getElementById('search-suggestions');
+    if (!container) return;
+    const term = state.filters.text.trim();
+    if (!term || state.filteredKeys.length > 0) {
+        container.classList.add('hidden');
+        return;
+    }
+    const suggestions = getSearchSuggestions(term);
+    if (!suggestions.length) {
+        container.classList.add('hidden');
+        return;
+    }
+    container.classList.remove('hidden');
+    container.innerHTML = `
+        <div class="suggestions-title">No exact matches. Try:</div>
+        <div class="suggestion-chips">
+            ${suggestions.map(item => `
+                <button class="suggestion-chip" data-tooltip="Suggested ${item.type}" onclick="applySearch('${escapeForSingleQuote(item.value)}')">
+                    ${item.value}
+                </button>
+            `).join('')}
+        </div>
+    `;
 }
 
 // ==========================================
@@ -1146,7 +1368,7 @@ function personOrg(p) {
 // ==========================================
 // CARD GENERATION
 // ==========================================
-function buildHistoryHTML(person, chartId) {
+function buildHistoryHTML(person, chartId, name) {
     if (!person || !person.Timeline || person.Timeline.length === 0) {
         return `<div class="history-loading">No detailed history available.</div>`;
     }
@@ -1157,12 +1379,26 @@ function buildHistoryHTML(person, chartId) {
     const recordGapHTML = recordGaps.length
         ? recordGaps.map(gap => `<div class="record-gap">No data between ${formatDate(gap.start)} and ${formatDate(gap.end)}</div>`).join('')
         : '';
+    const summary = name ? (state.masterData[name] || {}) : {};
+    const dataFlags = [];
+    if (summary._payMissing) dataFlags.push('Missing salary rate in one or more appointments.');
+    if (summary._colaMissing) {
+        const labels = summary._colaMissedLabels && summary._colaMissedLabels.length
+            ? ` (${summary._colaMissedLabels.join(', ')})`
+            : '';
+        dataFlags.push(`Possible COLA not received${labels}.`);
+    }
+    if (recordGaps.length) dataFlags.push(`Missing ${recordGaps.length} snapshot gap${recordGaps.length === 1 ? '' : 's'} in timeline.`);
+    const dataQualityHTML = dataFlags.length
+        ? `<div class="data-quality"><strong>Data quality flags:</strong>${dataFlags.map(flag => `<div>${flag}</div>`).join('')}</div>`
+        : '';
 
     return `
             <div class="history-meta" style="margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #444; font-size: 0.9rem; color: #a0a0a0;">
                 <strong>Hired:</strong> ${formatDate(person.Meta["First Hired"])} &nbsp;&bull;&nbsp;
                 <strong>Adj Service:</strong> ${formatDate(person.Meta["Adj Service Date"])}
             </div>
+            ${dataQualityHTML}
 
             <div class="personal-trend-section">
                 ${getPersonTrendHTML(person.Timeline, chartId)}
@@ -1188,6 +1424,7 @@ function buildHistoryHTML(person, chartId) {
             <div class="collapsible-section">
                 <button class="section-toggle" type="button" aria-expanded="false">Date & Source / Job Details / Type / Salary</button>
                 <div class="collapsible-body hidden">
+                    <div class="table-wrap" tabindex="0" aria-label="Job history table">
                     <table>
                         <thead><tr><th>Date & Source</th><th>Job Details</th><th>Type</th><th>Salary</th></tr></thead>
                         <tbody>
@@ -1220,6 +1457,7 @@ function buildHistoryHTML(person, chartId) {
                             }).join('')}
                         </tbody>
                     </table>
+                    </div>
                 </div>
             </div>
     `;
@@ -1251,20 +1489,38 @@ function generateCardHTML(name, idx) {
     const colaWarningHTML = (!person._isUnclass && person._colaMissing)
         ? `<span class="cola-warning" data-tooltip="${colaTooltip}">!</span>`
         : '';
+    const exclusionTooltip = 'Possible exclusion (classified → unclassified at some point).';
+    const exclusionWarningHTML = person._wasExcluded
+        ? `<span class="exclusion-warning" data-tooltip="${exclusionTooltip}">E</span>`
+        : '';
+    const dataFlags = [];
+    if (person._payMissing) dataFlags.push('Missing salary rate in one or more appointments.');
+    if (person._colaMissing) {
+        const labels = person._colaMissedLabels && person._colaMissedLabels.length
+            ? ` (${person._colaMissedLabels.join(', ')})`
+            : '';
+        dataFlags.push(`Possible COLA not received${labels}.`);
+    }
+    if (person._wasExcluded) dataFlags.push('Possible exclusion (classified → unclassified at some point).');
+    const dataFlagHTML = dataFlags.length
+        ? `<div class="data-flag" data-tooltip="${escapeHtmlAttr(dataFlags.join(' '))}">Data flags</div>`
+        : '';
 
     return `
     <div class="card" id="${cardId}" data-name="${attrName}" data-chart-id="${chartId}" style="${!isLatest ? 'opacity: 0.8;' : ''}">
         <div class="card-header" onclick="toggleCard('${cardId}')" onkeydown="handleCardKey(event, '${cardId}')" tabindex="0" role="button" aria-expanded="false" aria-controls="${historyId}">
             <div class="person-info">
                 <div class="name-header">
-                    <h2>${name} ${badgeHTML} ${colaWarningHTML}</h2>
+                    <h2>${name} ${badgeHTML} ${colaWarningHTML} ${exclusionWarningHTML}</h2>
                     <button class="link-btn-card" data-linkname="${attrName}" onclick="copyLink(event, this.dataset.linkname)" aria-label="Copy link">🔗</button>
+                    <button class="link-btn-card report-btn" data-report-name="${escapeHtmlAttr(name)}" data-tooltip="Report a data issue" aria-label="Report a data issue">!</button>
                 </div>
                 <p>Home Org: ${person.Meta["Home Orgn"] || 'N/A'}</p>
             </div>
             <div class="latest-stat">
                 <div class="latest-salary" data-tooltip="${totalPayTooltip}">${totalPayLabel}</div>
                 <div class="latest-role">${lastJob['Job Title'] || 'Unknown'}</div>
+                ${dataFlagHTML}
             </div>
         </div>
 
@@ -1293,7 +1549,7 @@ function loadAndRenderPersonDetails(cardEl) {
                 return null;
             }
             const chartId = cardEl.dataset.chartId;
-            historyEl.innerHTML = buildHistoryHTML(person, chartId);
+            historyEl.innerHTML = buildHistoryHTML(person, chartId, name);
             historyEl.dataset.loaded = 'true';
             if (hasInflationData()) refreshInflationControls();
             return person;
@@ -1314,6 +1570,18 @@ function renderInitial() {
     if (keys.length === 0) { els.results.innerHTML = `<p style="text-align:center; color:#888;">No matching records found.</p>`; return; }
     els.results.innerHTML = keys.map((name, idx) => generateCardHTML(name, idx)).join('') + getSentinel();
     observeSentinel();
+}
+
+function focusCardByIndex(idx) {
+    if (idx < 0 || idx >= state.filteredKeys.length) return;
+    while (idx >= state.visibleCount) appendNextBatch();
+    const card = document.getElementById(`card-${idx}`);
+    if (!card) return;
+    const header = card.querySelector('.card-header');
+    if (header) {
+        header.focus();
+        state.focusIndex = idx;
+    }
 }
 
 function appendNextBatch() {
@@ -1412,6 +1680,14 @@ els.salaryMax.addEventListener('input', debounce((e) => { state.filters.maxSalar
 els.inactiveToggle.addEventListener('change', (e) => { state.filters.showInactive = e.target.checked; runSearch(); });
 els.sortSelect.addEventListener('change', (e) => { state.filters.sort = e.target.value; runSearch(); });
 els.fteToggle.addEventListener('change', (e) => { state.filters.fullTimeOnly = e.target.checked; runSearch(); });
+els.dataFlagsToggle.addEventListener('change', (e) => { state.filters.dataFlagsOnly = e.target.checked; runSearch(); });
+els.exclusionsToggle.addEventListener('change', (e) => { state.filters.excludedOnly = e.target.checked; runSearch(); });
+
+function isTypingTarget(target) {
+    if (!target) return false;
+    const tag = target.tagName ? target.tagName.toLowerCase() : '';
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
+}
 
 function setupTooltips() {
     const tooltipEl = document.getElementById('custom-tooltip');
@@ -1426,6 +1702,96 @@ function setupTooltips() {
         }
     });
     document.addEventListener('mouseout', (e) => { if (e.target.closest('[data-tooltip]')) tooltipEl.classList.add('hidden'); });
+}
+
+function setupAdvancedSearchToggle() {
+    if (!els.advancedToggle || !els.advancedSearch) return;
+    els.advancedToggle.addEventListener('click', () => {
+        const isHidden = els.advancedSearch.classList.contains('hidden');
+        els.advancedSearch.classList.toggle('hidden', !isHidden);
+        els.advancedToggle.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
+    });
+}
+
+function setupHistoricalChartsToggle() {
+    const toggle = document.getElementById('historical-toggle');
+    const wrapper = document.getElementById('historical-charts');
+    if (!toggle || !wrapper) return;
+
+    toggle.addEventListener('click', () => {
+        const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
+        const nextExpanded = !isExpanded;
+        toggle.setAttribute('aria-expanded', String(nextExpanded));
+        wrapper.classList.toggle('hidden', !nextExpanded ? true : false);
+        wrapper.setAttribute('aria-hidden', String(!nextExpanded));
+        toggle.textContent = nextExpanded ? 'Hide historical charts' : 'Show historical charts';
+
+        if (nextExpanded && !state.historicalChartsRendered) {
+            renderInteractiveCharts(state.historyStats);
+            state.historicalChartsRendered = true;
+        }
+    });
+}
+
+function setupHotkeys() {
+    document.addEventListener('focusin', (e) => {
+        const card = e.target.closest('.card');
+        if (!card || !card.id) return;
+        const match = card.id.match(/^card-(\d+)$/);
+        if (match) state.focusIndex = parseInt(match[1], 10);
+    });
+
+    document.addEventListener('keydown', (e) => {
+        const modal = document.getElementById('info-modal');
+        const isModalOpen = modal && !modal.classList.contains('hidden');
+
+        if (e.key === 'Escape') {
+            if (isModalOpen) {
+                modal.classList.add('hidden');
+                return;
+            }
+            if (els.searchInput.value) {
+                els.searchInput.value = '';
+                els.clearBtn.classList.add('hidden');
+                state.filters.text = '';
+                runSearch();
+            }
+            return;
+        }
+
+        if (isModalOpen) return;
+
+        if (isTypingTarget(e.target)) return;
+
+        if (e.key === '?' ) {
+            if (modal) {
+                modal.classList.remove('hidden');
+                const hotkeys = document.getElementById('hotkeys-section');
+                if (hotkeys) hotkeys.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+            return;
+        }
+
+        if (e.key === '/' || (e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey))) {
+            e.preventDefault();
+            els.searchInput.focus();
+            return;
+        }
+
+        if (e.key === 'j' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            const next = state.focusIndex >= 0 ? state.focusIndex + 1 : 0;
+            focusCardByIndex(Math.min(next, state.filteredKeys.length - 1));
+            return;
+        }
+
+        if (e.key === 'k' || e.key === 'ArrowUp') {
+            if (e.ctrlKey || e.metaKey) return;
+            e.preventDefault();
+            const prev = state.focusIndex > 0 ? state.focusIndex - 1 : 0;
+            focusCardByIndex(prev);
+        }
+    });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1449,7 +1815,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    setupHotkeys();
+
     document.body.addEventListener('click', (e) => {
+        const reportBtn = e.target.closest('.report-btn');
+        if (reportBtn) {
+            const name = reportBtn.getAttribute('data-report-name') || '';
+            openCorrectionIssue(name);
+            return;
+        }
         const btn = e.target.closest('.section-toggle');
         if (!btn) return;
         const body = btn.nextElementSibling;
@@ -1478,6 +1852,22 @@ function copyLink(e, name) {
     const url = new URL(window.location.href); url.searchParams.set('name', name);
     window.history.pushState({ path: url.href }, '', url.href);
     navigator.clipboard.writeText(url.href).then(() => showToast(`Link copied for ${name}`)).catch(console.error);
+}
+
+function openCorrectionIssue(name) {
+    const base = 'https://github.com/jaxsnjohnson/osu-sal-report-data-and-site/issues/new';
+    const safeName = name || 'Unknown';
+    const title = `Data correction request: ${safeName}`;
+    const body = [
+        `Person: ${safeName}`,
+        'Report date:',
+        'Field:',
+        'Observed value:',
+        'Expected value:',
+        'Source link or notes:'
+    ].join('\\n');
+    const params = new URLSearchParams({ title, body });
+    window.open(`${base}?${params.toString()}`, '_blank', 'noopener');
 }
 function showToast(msg) {
     let t = document.getElementById('toast-notification');
