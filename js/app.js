@@ -9,6 +9,13 @@ const formatMoney = (amount) => {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(num);
 };
 
+const formatHourlyMoney = (amount) => {
+    if (!amount && amount !== 0) return '-';
+    const num = parseFloat(amount.toString().replace(/[^0-9.-]+/g, ''));
+    if (isNaN(num)) return amount;
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
+};
+
 const cleanMoney = (val) => {
     if (!val) return 0;
     if (typeof val === 'number') return val;
@@ -865,6 +872,21 @@ function getBaseKeys() {
     return buckets.active_all;
 }
 
+function hasInactiveSearchMatch(term) {
+    const query = (term || '').trim().toLowerCase();
+    if (!query) return false;
+    return state.keyBuckets.all.some(name => {
+        const person = state.masterData[name];
+        return !!(person && person._isActive === false && person._searchStr && person._searchStr.includes(query));
+    });
+}
+
+window.showFormerEmployeesInSearch = function() {
+    state.filters.showInactive = true;
+    if (els.inactiveToggle) els.inactiveToggle.checked = true;
+    runSearch();
+};
+
 // ==========================================
 // PERSON CHARTS
 // ==========================================
@@ -1317,8 +1339,9 @@ function updateSearchSuggestions() {
         container.classList.add('hidden');
         return;
     }
+    const suggestFormer = !state.filters.showInactive && hasInactiveSearchMatch(term);
     const suggestions = getSearchSuggestions(term);
-    if (!suggestions.length) {
+    if (!suggestions.length && !suggestFormer) {
         container.classList.add('hidden');
         return;
     }
@@ -1326,6 +1349,11 @@ function updateSearchSuggestions() {
     container.innerHTML = `
         <div class="suggestions-title">No exact matches. Try:</div>
         <div class="suggestion-chips">
+            ${suggestFormer ? `
+                <button class="suggestion-chip" data-tooltip="Include former/inactive employees in results" onclick="showFormerEmployeesInSearch()">
+                    Show former employees
+                </button>
+            ` : ''}
             ${suggestions.map(item => `
                 <button class="suggestion-chip" data-tooltip="Suggested ${item.type}" onclick="applySearch('${escapeForSingleQuote(item.value)}')">
                     ${item.value}
@@ -1534,13 +1562,17 @@ function buildHistoryHTML(person, chartId, name) {
                                         }
                                     }
                                     const termBadge = job['Salary Term'] ? ` <span class="term-badge">${job['Salary Term']}</span>` : '';
+                                    const hourlyRate = cleanMoney(job['Hourly Rate']);
+                                    const hourlyRateText = hourlyRate > 0
+                                        ? `<div class="hourly-rate">Hourly: ${formatHourlyMoney(hourlyRate)}/hr</div>`
+                                        : '';
                                     const salaryText = job._missingRate
                                         ? `<span class="missing-pay" data-tooltip="Report lists only the appointment term; no salary rate was provided.">Rate missing</span>${termBadge}`
                                         : `${formatMoney(job['Annual Salary Rate'])}${termBadge}`;
                                     return `<tr><td class="date-cell"><div>${formatDate(snap.Date)}</div><div class="badge badge-source">${(snap.Source || '').substring(0, 15)}...</div></td>
                                         <td><div style="font-weight:600;">${job['Job Title'] || ''}</div><div style="font-size:0.85rem; color:#64748b;">${job['Job Orgn'] || ''}</div></td>
                                         <td><span class="badge badge-type">${job['Job Type'] || '?'}</span></td>
-                                        <td class="money-cell">${salaryText}${diffHTML}</td></tr>`;
+                                        <td class="money-cell">${salaryText}${hourlyRateText}${diffHTML}</td></tr>`;
                                 }).join('')
                             }).join('')}
                         </tbody>
