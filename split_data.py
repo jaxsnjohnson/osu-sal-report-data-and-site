@@ -138,6 +138,8 @@ def main():
 
         prev_is_unclass = None
         was_excluded = False
+        first_exclusion_date = None
+        started_classified = None  # track initial classification
         for idx, snap in enumerate(timeline):
             date = snap.get("Date")
             if date:
@@ -145,8 +147,14 @@ def main():
 
             src = (snap.get("Source") or "").lower()
             is_unclass = "unclass" in src
+            if started_classified is None:
+                started_classified = not is_unclass  # True if first snapshot is classified
+
             if prev_is_unclass is not None and (not prev_is_unclass) and is_unclass:
-                was_excluded = True
+                if started_classified:
+                    was_excluded = True
+                    if not first_exclusion_date:
+                        first_exclusion_date = date
             if prev_is_unclass is not None and is_unclass != prev_is_unclass and date:
                 year = date[:4]
                 if year:
@@ -247,13 +255,16 @@ def main():
             "_colaChecked": 0,
             "_colaMissedLabels": [],
             "_colaMissing": False,
-            "_wasExcluded": was_excluded,
+            "_wasExcluded": was_excluded and is_unclass,
+            "_exclusionDate": first_exclusion_date if (was_excluded and is_unclass) else "",
         }
 
         bucket = bucket_for_name(name)
         buckets[bucket][name] = {
             "Meta": person.get("Meta", {}),
             "Timeline": timeline,
+            "_wasExcluded": was_excluded and is_unclass,
+            "_exclusionDate": first_exclusion_date if (was_excluded and is_unclass) else "",
         }
 
     # Build peer medians + percentiles
