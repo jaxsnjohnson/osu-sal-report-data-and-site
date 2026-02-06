@@ -210,10 +210,14 @@
                         <input type="checkbox" id="data-flags-toggle" style="margin-right: 8px;">
                         Data Flags Only
                     </label>
-                    <label class="toggle-container exclusions-toggle" data-tooltip="Show those who were offered or moved out of a classified SEIU 503 represented position.">
-                        <input type="checkbox" id="exclusions-toggle" style="margin-right: 8px;">
-                        Show Those Excluded
-                    </label>
+                    <div class="exclusions-toggle" data-tooltip="Show those who were offered or moved out of a classified SEIU 503 represented position.">
+                        <div class="exclusion-title">Show Those Excluded</div>
+                        <select id="exclusions-mode" class="filter-select exclusion-select" aria-label="Show excluded records">
+                            <option value="off">Off</option>
+                            <option value="all">On (all time)</option>
+                            <option value="recent">Last 12 months</option>
+                        </select>
+                    </div>
                 </div>
             </div>
 
