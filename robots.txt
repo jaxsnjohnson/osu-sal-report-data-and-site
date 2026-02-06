@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Disallow: /workday-lists/
+Disallow: /workday-lists
+Disallow: /workday-lists/*.html
+Disallow: /workday-lists/*.xlsx
+Disallow: /workday-lists/*.xls
+Disallow: /workday-lists/*.csv
+Disallow: /workday-lists/*.tsv
+
+Sitemap: https://osu.oregonhigheredsalaries.org/sitemap.xml
