@@ -255,6 +255,7 @@ const buildSearchIndex = (names, roles) => {
     };
     names.forEach(name => addItem(name, 'name'));
     roles.forEach(role => addItem(role, 'role'));
+    index.sort((a, b) => a.key < b.key ? -1 : (a.key > b.key ? 1 : 0));
     return index;
 };
 
@@ -282,30 +283,97 @@ const boundedEditDistance = (a, b, maxDist) => {
     return prev[blen];
 };
 
+const findPrefixRange = (index, prefix) => {
+    let low = 0;
+    let high = index.length - 1;
+    let start = -1;
+
+    while (low <= high) {
+        const mid = (low + high) >>> 1;
+        if (index[mid].key >= prefix) {
+            start = mid;
+            high = mid - 1;
+        } else {
+            low = mid + 1;
+        }
+    }
+
+    if (start === -1 || !index[start].key.startsWith(prefix)) {
+        return { start: -1 };
+    }
+    return { start };
+};
+
 const getSearchSuggestions = (term, limit = 6) => {
     const query = term.trim().toLowerCase();
     if (!query || query.length < 3) return [];
     const maxDist = query.length <= 4 ? 1 : (query.length <= 6 ? 2 : 3);
     const scored = [];
-    for (const item of state.searchIndex) {
-        const key = item.key;
-        let score = null;
-        if (key.startsWith(query)) {
-            score = 0;
-        } else if (key.includes(query)) {
-            score = 1;
-        } else {
-            let bestDist = maxDist + 1;
-            for (const token of item.tokens) {
-                if (token.length < 3) continue;
-                const dist = boundedEditDistance(query, token, maxDist);
-                if (dist < bestDist) bestDist = dist;
-                if (bestDist === 0) break;
+
+    // 1. Prefix matches (Score 0) using Binary Search
+    const { start } = findPrefixRange(state.searchIndex, query);
+    let prefixEnd = -1;
+
+    if (start !== -1) {
+        for (let i = start; i < state.searchIndex.length; i++) {
+            const item = state.searchIndex[i];
+            if (!item.key.startsWith(query)) {
+                prefixEnd = i;
+                break;
             }
-            if (bestDist <= maxDist) score = 2 + bestDist;
+            scored.push({ score: 0, value: item.value, type: item.type });
         }
-        if (score !== null) scored.push({ score, value: item.value, type: item.type });
+        if (prefixEnd === -1) prefixEnd = state.searchIndex.length;
     }
+
+    // Optimization: If enough prefix matches, return early
+    if (scored.length >= limit) {
+        // Sort by length (shortest first)
+        scored.sort((a, b) => a.value.length - b.value.length);
+
+        const results = [];
+        const seen = new Set();
+        for (const item of scored) {
+            const key = item.value.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            results.push(item);
+            if (results.length >= limit) break;
+        }
+        return results;
+    }
+
+    // 2. Substring & Fuzzy matches (Score 1 & 2+)
+    // Iterate everything OUTSIDE the prefix range
+    const searchRest = (startIndex, endIndex) => {
+        for (let i = startIndex; i < endIndex; i++) {
+            const item = state.searchIndex[i];
+            const key = item.key;
+            let score = null;
+
+            if (key.includes(query)) {
+                score = 1;
+            } else {
+                let bestDist = maxDist + 1;
+                for (const token of item.tokens) {
+                    if (token.length < 3) continue;
+                    const dist = boundedEditDistance(query, token, maxDist);
+                    if (dist < bestDist) bestDist = dist;
+                    if (bestDist === 0) break;
+                }
+                if (bestDist <= maxDist) score = 2 + bestDist;
+            }
+            if (score !== null) scored.push({ score, value: item.value, type: item.type });
+        }
+    };
+
+    if (start === -1) {
+        searchRest(0, state.searchIndex.length);
+    } else {
+        searchRest(0, start);
+        searchRest(prefixEnd, state.searchIndex.length);
+    }
+
     scored.sort((a, b) => (a.score - b.score) || (a.value.length - b.value.length));
     const results = [];
     const seen = new Set();
