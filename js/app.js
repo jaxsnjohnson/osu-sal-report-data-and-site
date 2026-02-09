@@ -445,14 +445,35 @@ const getTimelineYears = (timeline) => {
 };
 
 const calculateMovingAverage = (data, windowSize, accessor = (d) => d) => {
-    const ma = [];
-    for (let i = 0; i < data.length; i++) {
-        const start = Math.max(0, i - windowSize + 1);
-        const end = i + 1;
-        const subset = data.slice(start, end);
-        const avg = subset.reduce((sum, item) => sum + accessor(item), 0) / subset.length;
-        ma.push(avg);
+    const length = data.length;
+    if (length === 0) return [];
+
+    const maxWindow = Math.ceil(windowSize);
+    if (maxWindow <= 0) return new Array(length).fill(NaN);
+
+    const ma = new Array(length);
+    const bufferSize = Math.min(maxWindow, length);
+    const buffer = new Array(bufferSize);
+    let head = 0;
+    let count = 0;
+    let sum = 0;
+
+    for (let i = 0; i < length; i++) {
+        const val = accessor(data[i]);
+        sum += val;
+
+        if (count < bufferSize) {
+            count += 1;
+        } else {
+            sum -= buffer[head];
+        }
+
+        buffer[head] = val;
+        head = (head + 1) % bufferSize;
+
+        ma[i] = sum / count;
     }
+
     return ma;
 };
 
