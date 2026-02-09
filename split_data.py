@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import re
 import string
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
@@ -11,6 +12,8 @@ COLA_EVENTS = [
     {"label": "3.5% COLA", "effective": "2025-06-01", "pct": 3.5},
 ]
 COLA_TOLERANCE_PCT = 0.4
+
+_NON_NUMERIC_RE = re.compile(r"[^0-9.-]+")
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 RAW_PATH = os.path.join(ROOT, "data.json")
@@ -25,10 +28,12 @@ def parse_float(val):
         return None
     if isinstance(val, (int, float)):
         return float(val)
+    cleaned = _NON_NUMERIC_RE.sub("", str(val))
+    if not cleaned:
+        return None
     try:
-        s = "".join(ch for ch in str(val) if ch.isdigit() or ch in ".-")
-        return float(s) if s else None
-    except Exception:
+        return float(cleaned)
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
