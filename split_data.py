@@ -57,6 +57,16 @@ def calculate_snapshot_pay(snapshot):
     return total
 
 
+def _median_sorted(vals):
+    n = len(vals)
+    if n == 0:
+        return 0.0
+    mid = n >> 1
+    if n & 1:
+        return vals[mid]
+    return (vals[mid - 1] + vals[mid]) * 0.5
+
+
 def median(values, presorted=False):
     n = len(values)
     if n == 0:
@@ -65,11 +75,9 @@ def median(values, presorted=False):
         return values[0]
     if n == 2:
         return (values[0] + values[1]) / 2.0
+
     vals = values if presorted else sorted(values)
-    mid = n // 2
-    if n % 2 == 1:
-        return vals[mid]
-    return (vals[mid - 1] + vals[mid]) / 2.0
+    return _median_sorted(vals)
 
 
 def build_cola_pairs(dates, events):
