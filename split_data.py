@@ -2,6 +2,7 @@
 import json
 import os
 import string
+from bisect import bisect_left, bisect_right
 from collections import defaultdict
 
 COLA_EVENTS = [
@@ -56,12 +57,17 @@ def calculate_snapshot_pay(snapshot):
     return total
 
 
-def median(values):
-    if not values:
+def median(values, presorted=False):
+    n = len(values)
+    if n == 0:
         return 0.0
-    vals = sorted(values)
-    mid = len(vals) // 2
-    if len(vals) % 2 == 1:
+    if n == 1:
+        return values[0]
+    if n == 2:
+        return (values[0] + values[1]) / 2.0
+    vals = values if presorted else sorted(values)
+    mid = n // 2
+    if n % 2 == 1:
         return vals[mid]
     return (vals[mid - 1] + vals[mid]) / 2.0
 
@@ -273,7 +279,9 @@ def main():
     for date, bucket_map in peer_buckets.items():
         peer_median_map[date] = {}
         for key, values in bucket_map.items():
-            peer_median_map[date][key] = median(values)
+            # Sort once so median and percentile both reuse the same ordering.
+            values.sort()
+            peer_median_map[date][key] = median(values, presorted=True)
 
     # Compute per-person peer percentile (latest snapshot org+role)
     for name, person in data.items():
@@ -292,17 +300,13 @@ def main():
         key = f"{org}||{role}"
         date = last_snap.get("Date")
         last_pay = calculate_snapshot_pay(last_snap)
-        bucket = peer_buckets.get(date, {}).get(key, [])
+        date_buckets = peer_buckets.get(date)
+        bucket = date_buckets.get(key) if date_buckets else None
         if not bucket or len(bucket) <= 1 or last_pay <= 0:
             peer_percentiles[name] = None
             continue
-        below = 0
-        equal = 0
-        for val in bucket:
-            if val < last_pay:
-                below += 1
-            elif val == last_pay:
-                equal += 1
+        below = bisect_left(bucket, last_pay)
+        equal = bisect_right(bucket, last_pay) - below
         peer_percentiles[name] = ((below + 0.5 * equal) / len(bucket)) * 100.0
 
     for name, pct in peer_percentiles.items():
