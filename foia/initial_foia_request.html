@@ -25,10 +25,16 @@
             padding: 40px;
         }
 
-        .email-container {
-            background-color: var(--bg-card);
+        .email-stack {
             max-width: 800px;
             margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .email-container {
+            background-color: var(--bg-card);
             border: 1px solid var(--border);
             border-radius: 12px; /* Matching card border-radius */
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
@@ -127,75 +133,183 @@
             background: #000;
             color: #000;
         }
+
+        .thread-email {
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            background-color: #242424;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+        }
+
+        .thread-email-header {
+            background-color: #202020;
+            border-bottom: 1px solid var(--border);
+            padding: 14px 16px;
+            font-size: 0.92rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+        }
+
+        .thread-subject {
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .thread-meta {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            background-color: #1f1f1f;
+            line-height: 1.55;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }
+
+        .verbatim-email {
+            margin: 0;
+            padding: 16px;
+            white-space: pre-wrap;
+            font-size: 0.92rem;
+            line-height: 1.6;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            background-color: #242424;
+        }
     </style>
 </head>
 <body>
 
-    <div class="email-container">
-        <div class="email-header">
-            <div class="header-row">
-                <div class="header-label">From:</div>
-                <div class="header-value">Johnson, Jax S &lt;jax.johnson@oregonstate.edu&gt;</div>
+    <div class="email-stack">
+        <div class="email-container">
+            <div class="email-header">
+                <div class="header-row">
+                    <div class="header-label">From:</div>
+                    <div class="header-value">Johnson, Jax S &lt;<span class="redacted" title="requester email redacted">█████████████████████████</span>&gt;</div>
+                </div>
+                <div class="header-row">
+                    <div class="header-label">Date:</div>
+                    <div class="header-value">Fri 2026-01-30 4:09 PM</div>
+                </div>
+                <div class="header-row">
+                    <div class="header-label">To:</div>
+                    <div class="header-value">Public Records, OSU &lt;PublicRecords@oregonstate.edu&gt;</div>
+                </div>
+                <div class="header-row">
+                    <div class="header-label"></div>
+                    <div class="header-value">Harrison, Janet &lt;janet.harrison@oregonstate.edu&gt;</div> 
+                </div>
+                <div class="header-row">
+                    <div class="header-label">Subject:</div>
+                    <div class="header-value"><strong>Public Records Request - Classified and Unclassified Staffing Data</strong></div>
+                </div>
             </div>
-            <div class="header-row">
-                <div class="header-label">Date:</div>
-                <div class="header-value">Fri 2026-01-30 4:08 PM</div>
-            </div>
-            <div class="header-row">
-                <div class="header-label">To:</div>
-                <div class="header-value">Public Records, OSU &lt;PublicRecords@oregonstate.edu&gt;</div>,
-            </div>
-            <div class="header-row">
-                <div class="header-label"></div>
-                <div class="header-value">Harrison, Janet &lt;janet.harrison@oregonstate.edu&gt;</div> 
-            </div>
-            <div class="header-row">
-                <div class="header-label">Subject:</div>
-                <div class="header-value"><strong>Public Records Request - Classified and Unclassified Staffing Data</strong></div>
+
+            <div class="email-body">
+                <div class="letter-header-block">
+                    Jax SN Johnson<br>
+                    <span class="redacted" title="redacted for private citizen">████ ██ ███████ ████</span><br>
+                    <span class="redacted" title="redacted for private citizen">█████████, ██, █████</span><br>
+                    (███) ███-████<br>
+                    2026-01-30
+                </div>
+
+                <div class="recipient-block">
+                    Janet Harrison<br>
+                    Public Records Officer<br>
+                    University Relations and Marketing<br>
+                    Oregon State University<br>
+                    416M Kerr Administration Bldg<br>
+                    Corvallis, Oregon 97331
+                </div>
+
+                <p>Dear Public Records Officer:</p>
+                
+                <p>Under the Oregon Public Records Law, §192.311 et seq., I am requesting an opportunity to inspect or obtain copies of public records regarding employment data for Oregon State University.</p>
+
+                <h3>Records Requested</h3>
+                <p>I am requesting a current list of all Classified employees and Unclassified employees currently employed by the University, and the quarterly reports issued on the university website for the last 13 years. This data can be provided in the same format as the quarterly salary reports. This data should be provided digitally, no trees should be directly harmed for the creation of this report. This data, for older reports, should have who generated/authored them cited in a separate file.</p>
+
+                <h3>Fee Waiver Request</h3>
+                <p>If there are any fees for searching or copying these records, please inform me if the cost will exceed $5.00.</p>
+                
+                <p>However, I would also like to request a waiver of all fees in that the disclosure of the requested information is in the public interest and will contribute significantly to the public’s understanding of the allocation of public resources for university staffing.</p>
+                
+                <p>Specifically, this information will shed light on the distribution of the workforce between classified and unclassified positions and the use of state funds for public employment. This information is not being sought for commercial purposes.</p>
+                
+                <p>I request a prompt response to this inquiry. If you expect a significant delay in responding to or in fulfilling this request, please contact me with information about when I might expect copies or the ability to inspect the requested records.</p>
+                
+                <p>If you deny any or all of this request, please cite each specific exemption you feel justifies the refusal to release the information and notify me of the appeal procedures available to me under the law.</p>
+                
+                <p>Thank you for considering my request.</p>
+                
+                <p>Sincerely,</p>
+                
+                <p>Jax</p>
             </div>
         </div>
 
-        <div class="email-body">
-            <div class="letter-header-block">
-                Jax SN Johnson<br>
-                <span class="redacted" title="redacted for private citizen">████ ██ ███████ ████</span><br>
-                <span class="redacted" title="redacted for private citizen">█████████, ██, █████</span><br>
-                (███) ███-████<br>
-                2026-01-30
+        <div class="thread-email">
+            <div class="email-header">
+                <div class="header-row">
+                    <div class="header-label">From:</div>
+                    <div class="header-value">Public Records, OSU &lt;PublicRecords@oregonstate.edu&gt;</div>
+                </div>
+                <div class="header-row">
+                    <div class="header-label">Date:</div>
+                    <div class="header-value">Wed 2026-02-11 4:09 PM</div>
+                </div>
+                <div class="header-row">
+                    <div class="header-label">To:</div>
+                    <div class="header-value">Johnson, Jax S &lt;[requester email redacted]&gt;</div>
+                </div>
+                <div class="header-row">
+                    <div class="header-label">Subject:</div>
+                    <div class="header-value"><strong>RE: Public Records Request - Classified and Unclassified Staffing Data PRR 2026-072</strong></div>
+                </div>
             </div>
+            <pre class="verbatim-email">Hello,
 
-            <div class="recipient-block">
-                Janet Harrison<br>
-                Public Records Officer<br>
-                University Relations and Marketing<br>
-                Oregon State University<br>
-                416M Kerr Administration Bldg<br>
-                Corvallis, Oregon 97331
+In processing your request, I noticed that I need some clarification. Since your request is coming from an OSU email address, please let me know whether you are making the request on your own behalf or if you are making the request as part of your official work duties.
+If it is in your personal capacity, I can move forward with the request. If your request is part of your work duties, your request will be denied.
+Per ORS 192.314(1), the law confers a right on every “person” to inspect public records which are not otherwise exempt under the law. The term “person” is defined to include “…any natural person, corporation, partnership, firm, association or member or committee of the Legislative Assembly” in ORS 192.311(3). A public body may not use Oregon Public Records Law to obtain public records from another public body. Similarly, a public official, other than a legislator, acting within an official capacity may not rely on the Oregon Public Records Law to obtain records. If you are requesting these records on behalf of Oregon State University, since it is a public body, you may not use Oregon Public Records Law to obtain records.
+I have attached two Oregon Attorney General’s opinion on this matter.
+I look forward to hearing from you so I can determine how to proceed.
+
+Thanks for your interest in OSU!
+Janet Harrison
+Public Records Officer
+University Relations and Marketing
+Oregon State University
+416M Kerr Admin Bldg
+Corvallis, OR 97331
+541-737-0839</pre>
+        </div>
+
+        <div class="thread-email">
+            <div class="email-header">
+                <div class="header-row">
+                    <div class="header-label">From:</div>
+                    <div class="header-value">Johnson, Jax S &lt;[requester email redacted]&gt;</div>
+                </div>
+                <div class="header-row">
+                    <div class="header-label">Date:</div>
+                    <div class="header-value">Wed 2026-02-11 4:32 PM</div>
+                </div>
+                <div class="header-row">
+                    <div class="header-label">To:</div>
+                    <div class="header-value">Public Records, OSU &lt;PublicRecords@oregonstate.edu&gt;</div>
+                </div>
+                <div class="header-row">
+                    <div class="header-label">Subject:</div>
+                    <div class="header-value"><strong>Re: Public Records Request - Classified and Unclassified Staffing Data PRR 2026-072</strong></div>
+                </div>
             </div>
-
-            <p>Dear Public Records Officer:</p>
-            
-            <p>Under the Oregon Public Records Law, §192.311 et seq., I am requesting an opportunity to inspect or obtain copies of public records regarding employment data for Oregon State University.</p>
-
-            <h3>Records Requested</h3>
-            <p>I am requesting a current list of all Classified employees and Unclassified employees currently employed by the University, and the quarterly reports issued on the university website for the last 13 years. This data can be provided in the same format as the quarterly salary reports. This data should be provided digitally, no trees should be directly harmed for the creation of this report. This data, for older reports, should have who generated/authored them cited in a separate file.</p>
-
-            <h3>Fee Waiver Request</h3>
-            <p>If there are any fees for searching or copying these records, please inform me if the cost will exceed $5.00.</p>
-            
-            <p>However, I would also like to request a waiver of all fees in that the disclosure of the requested information is in the public interest and will contribute significantly to the public’s understanding of the allocation of public resources for university staffing.</p>
-            
-            <p>Specifically, this information will shed light on the distribution of the workforce between classified and unclassified positions and the use of state funds for public employment. This information is not being sought for commercial purposes.</p>
-            
-            <p>I request a prompt response to this inquiry. If you expect a significant delay in responding to or in fulfilling this request, please contact me with information about when I might expect copies or the ability to inspect the requested records.</p>
-            
-            <p>If you deny any or all of this request, please cite each specific exemption you feel justifies the refusal to release the information and notify me of the appeal procedures available to me under the law.</p>
-            
-            <p>Thank you for considering my request.</p>
-            
-            <p>Sincerely,</p>
-            
-            <p>Jax</p>
+            <pre class="verbatim-email">Hi Janet,
+Thank you for the clarification and the attached legal opinions.
+I am making this request on my own behalf and in my personal capacity as a natural person. This request is not being made as part of my official work duties at Oregon State University, nor am I requesting these records on behalf of the University as a public body.
+I look forward to proceeding with the request. Please let me know if you need any further information to process this inquiry.
+Best regards,
+Jax S. Johnson</pre>
         </div>
     </div>
 
