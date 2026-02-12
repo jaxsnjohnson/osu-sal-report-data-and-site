@@ -553,25 +553,25 @@ const calculateMovingAverage = (data, windowSize, accessor = (d) => d) => {
 
     const ma = new Array(length);
     const bufferSize = Math.min(maxWindow, length);
-    const buffer = new Array(bufferSize);
+    const buffer = new Float64Array(bufferSize);
     let head = 0;
-    let count = 0;
     let sum = 0;
 
-    for (let i = 0; i < length; i++) {
+    for (let i = 0; i < bufferSize; i++) {
         const val = accessor(data[i]);
         sum += val;
+        buffer[i] = val;
+        ma[i] = sum / (i + 1);
+    }
 
-        if (count < bufferSize) {
-            count += 1;
-        } else {
-            sum -= buffer[head];
-        }
-
+    for (let i = bufferSize; i < length; i++) {
+        const val = accessor(data[i]);
+        const removed = buffer[head];
+        sum = sum - removed + val;
         buffer[head] = val;
-        head = (head + 1) % bufferSize;
-
-        ma[i] = sum / count;
+        head++;
+        if (head >= bufferSize) head = 0;
+        ma[i] = sum / bufferSize;
     }
 
     return ma;

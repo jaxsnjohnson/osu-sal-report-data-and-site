@@ -1,0 +1,20 @@
+127.0.0.1 - - [12/Feb/2026 05:08:34] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [12/Feb/2026 05:08:34] "GET /js/inflation-data.js HTTP/1.1" 200 -
+127.0.0.1 - - [12/Feb/2026 05:08:34] "GET /js/app.js HTTP/1.1" 200 -
+127.0.0.1 - - [12/Feb/2026 05:08:34] "GET /css/styles.css HTTP/1.1" 200 -
+127.0.0.1 - - [12/Feb/2026 05:08:34] "GET /data/index.json HTTP/1.1" 200 -
+127.0.0.1 - - [12/Feb/2026 05:08:34] "GET /data/aggregates.json HTTP/1.1" 200 -
+127.0.0.1 - - [12/Feb/2026 05:08:34] "GET /inflation.json HTTP/1.1" 200 -
+127.0.0.1 - - [12/Feb/2026 05:08:37] "GET /js/search-worker.js HTTP/1.1" 200 -
+127.0.0.1 - - [12/Feb/2026 05:08:37] code 404, message File not found
+127.0.0.1 - - [12/Feb/2026 05:08:37] "GET /js/data/search-index.json HTTP/1.1" 404 -
+127.0.0.1 - - [12/Feb/2026 05:09:33] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [12/Feb/2026 05:09:33] "GET /css/styles.css HTTP/1.1" 200 -
+127.0.0.1 - - [12/Feb/2026 05:09:33] "GET /js/inflation-data.js HTTP/1.1" 200 -
+127.0.0.1 - - [12/Feb/2026 05:09:33] "GET /js/app.js HTTP/1.1" 200 -
+127.0.0.1 - - [12/Feb/2026 05:09:33] "GET /inflation.json HTTP/1.1" 200 -
+127.0.0.1 - - [12/Feb/2026 05:09:33] "GET /data/aggregates.json HTTP/1.1" 200 -
+127.0.0.1 - - [12/Feb/2026 05:09:33] "GET /data/index.json HTTP/1.1" 200 -
+127.0.0.1 - - [12/Feb/2026 05:09:34] "GET /js/search-worker.js HTTP/1.1" 200 -
+127.0.0.1 - - [12/Feb/2026 05:09:34] code 404, message File not found
+127.0.0.1 - - [12/Feb/2026 05:09:34] "GET /js/data/search-index.json HTTP/1.1" 404 -
