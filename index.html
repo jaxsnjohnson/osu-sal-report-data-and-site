@@ -23,6 +23,14 @@
     <link rel="icon" type="image/x-icon" href="https://osu.oregonhigheredsalaries.org/icons/favicon.ico">
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group identify setPersonProperties setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags resetGroups onFeatureFlags addFeatureFlagsHandler onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+        posthog.init('phc_u1MTs7VptWYIYjTOiaB5JaGayfGLmAEG9Amjm7yfd1p', {
+            api_host: 'https://us.i.posthog.com',
+            defaults: '2026-01-30',
+            respect_dnt: true
+        });
+    </script>
 
     <style>
         .foia-banner {
@@ -160,11 +168,27 @@
             <div class="search-wrapper">
                 <input type="text" id="search" class="search-bar" placeholder="Search name, org... (/)" aria-label="Search personnel">
                 <button id="clear-search" class="clear-btn hidden" aria-label="Clear search" tabindex="-1">&times;</button>
+                <span id="regex-pill" class="regex-pill hidden" data-tooltip="Regex mode enabled. Use /pattern/flags syntax.">/regex</span>
             </div>
+            <div id="search-autocomplete" class="search-autocomplete hidden" role="listbox" aria-label="Search suggestions"></div>
             <button type="button" id="advanced-toggle" class="advanced-toggle" aria-expanded="false">
                 Advanced
             </button>
             <div id="suggested-searches" class="chip-container"></div>
+            <details class="dsl-help">
+                <summary>Search syntax</summary>
+                <div class="dsl-help-body">
+                    <span class="dsl-chip"><code>name:smith</code></span>
+                    <span class="dsl-chip"><code>org:engineering</code></span>
+                    <span class="dsl-chip"><code>role:\"research assistant\"</code></span>
+                    <span class="dsl-chip"><code>type:classified</code></span>
+                    <span class="dsl-chip"><code>status:active</code></span>
+                    <span class="dsl-chip"><code>pay:60k-90k</code></span>
+                    <span class="dsl-chip"><code>sort:salary</code></span>
+                    <span class="dsl-chip"><code>-athletics</code></span>
+                    <span class="dsl-chip"><code>/^anderson, [jm]/i</code></span>
+                </div>
+            </details>
 
             <div id="advanced-search" class="advanced-search hidden">
                 <div style="display: flex; gap: 10px; width: 100%; flex-wrap: wrap; align-items: stretch;">
@@ -270,6 +294,14 @@
                 <li>Totals are computed from Annual Salary Rate × Appt Percent (FTE).</li>
                 <li>Yearly transition counts are based on changes between consecutive snapshots.</li>
             </ul>
+        </div>
+
+        <div class="modal-section">
+            <h3>Usage Analytics</h3>
+            <p>
+                This site uses PostHog to collect interaction analytics (for example: searches, filter usage, and record opens)
+                so we can improve the tool. Browser Do Not Track is respected.
+            </p>
         </div>
 
         <div class="modal-section">
