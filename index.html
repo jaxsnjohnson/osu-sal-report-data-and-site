@@ -300,12 +300,34 @@
             </ul>
         </div>
 
-        <div class="modal-section">
-            <h3>Usage Analytics</h3>
-            <p>
-                This site uses PostHog to collect interaction analytics (for example: searches, filter usage, and record opens)
-                so we can improve the tool. Browser Do Not Track is respected.
-            </p>
+        <div class="modal-section collapsible">
+            <button class="collapsible-btn" aria-expanded="false">
+                <span class="title">Usage Analytics</span>
+                <span class="icon">▶</span>
+            </button>
+            <div class="collapsible-content hidden">
+                <p>
+                    We use PostHog to understand how people use this site so we can make it better and fix confusing parts.
+                    In plain English, we track how the tool is used, not private messages or account passwords.
+                </p>
+                <ul class="def-list">
+                    <li>
+                        <strong>What we collect:</strong> searches you run, filters you change, which result cards are opened, when more results are loaded, when historical charts are toggled, and when links/correction buttons are clicked.
+                    </li>
+                    <li>
+                        <strong>What we include with events:</strong> page path, search text (limited length), number of results, and basic dataset context (latest classified/unclassified snapshot dates).
+                    </li>
+                    <li>
+                        <strong>Why we collect it:</strong> to find zero-result searches, improve search relevance, understand which features are useful, and prioritize bug fixes and UX improvements.
+                    </li>
+                    <li>
+                        <strong>What we do not collect here:</strong> account passwords, payment info, or private direct messages.
+                    </li>
+                    <li>
+                        <strong>Control:</strong> Browser Do Not Track is respected.
+                    </li>
+                </ul>
+            </div>
         </div>
 
         <div class="modal-section">
