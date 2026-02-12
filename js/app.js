@@ -552,6 +552,13 @@ const calculateMovingAverage = (data, windowSize, accessor = (d) => d) => {
     if (maxWindow <= 0) return new Array(length).fill(NaN);
 
     const ma = new Array(length);
+    if (maxWindow === 1) {
+        for (let i = 0; i < length; i++) {
+            ma[i] = accessor(data[i]);
+        }
+        return ma;
+    }
+
     const bufferSize = Math.min(maxWindow, length);
     const buffer = new Array(bufferSize);
     let head = 0;
@@ -562,14 +569,15 @@ const calculateMovingAverage = (data, windowSize, accessor = (d) => d) => {
         const val = accessor(data[i]);
         sum += val;
 
-        if (count < bufferSize) {
-            count += 1;
-        } else {
+        if (count === bufferSize) {
             sum -= buffer[head];
+        } else {
+            count += 1;
         }
 
         buffer[head] = val;
-        head = (head + 1) % bufferSize;
+        head += 1;
+        if (head === bufferSize) head = 0;
 
         ma[i] = sum / count;
     }
