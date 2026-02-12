@@ -21,6 +21,7 @@ OUT_DIR = os.path.join(ROOT, "data")
 PEOPLE_DIR = os.path.join(OUT_DIR, "people")
 INDEX_PATH = os.path.join(OUT_DIR, "index.json")
 AGG_PATH = os.path.join(OUT_DIR, "aggregates.json")
+SEARCH_INDEX_PATH = os.path.join(OUT_DIR, "search-index.json")
 
 
 def parse_float(val):
@@ -134,6 +135,7 @@ def main():
     stats_map = {}
     peer_buckets = defaultdict(lambda: defaultdict(list))
     class_transitions = {}
+    search_index = []
 
     latest_class_date = ""
     latest_unclass_date = ""
@@ -144,6 +146,7 @@ def main():
         timeline.sort(key=lambda s: s.get("Date") or "")
 
         role_set = set()
+        role_title_set = set()
         snap_by_date_pay = {}
 
         last_snap = timeline[-1] if timeline else None
@@ -193,6 +196,7 @@ def main():
                 if title:
                     all_roles.add(title)
                     role_set.add(title.lower())
+                    role_title_set.add(title)
 
             snap_pay = calculate_snapshot_pay(snap)
             if date:
@@ -253,7 +257,19 @@ def main():
         meta = person.get("Meta", {})
         search_role = last_job.get("Job Title") or ""
         search_org = last_job.get("Job Orgn") or ""
-        search_str = f"{name} {meta.get('Home Orgn', '')} {meta.get('First Hired', '')} {search_role} {search_org}".lower()
+        home_org = meta.get("Home Orgn", "")
+        first_hired = meta.get("First Hired", "")
+        search_str = f"{name} {home_org} {first_hired} {search_role} {search_org}".lower()
+        is_active = False
+        target_date = latest_unclass_date if is_unclass else latest_class_date
+        if last_date and (not target_date or last_date == target_date):
+            is_active = True
+        first_hired_year = None
+        if first_hired:
+            m = re.search(r"(\d{4})$", first_hired)
+            if m:
+                first_hired_year = int(m.group(1))
+        top_roles = sorted(role_title_set)[:3]
 
         index[name] = {
             "Meta": {
@@ -277,6 +293,21 @@ def main():
             "_wasExcluded": was_excluded and is_unclass,
             "_exclusionDate": first_exclusion_date if (was_excluded and is_unclass) else "",
         }
+        search_index.append({
+            "name": name,
+            "homeOrg": home_org,
+            "lastOrg": search_org,
+            "roles": top_roles,
+            "isUnclass": is_unclass,
+            "isActive": is_active,
+            "isFullTime": is_full_time,
+            "totalPay": total_pay,
+            "firstHiredYear": first_hired_year,
+            "lastDate": last_date or "",
+            "hasFlags": bool(pay_missing),
+            "wasExcluded": bool(was_excluded and is_unclass),
+            "exclusionDate": first_exclusion_date if (was_excluded and is_unclass) else "",
+        })
 
         bucket = bucket_for_name(name)
         buckets[bucket][name] = {
@@ -285,6 +316,15 @@ def main():
             "_wasExcluded": was_excluded and is_unclass,
             "_exclusionDate": first_exclusion_date if (was_excluded and is_unclass) else "",
         }
+
+    # Finalize active flags once global latest snapshot dates are known.
+    for record in search_index:
+        if record.get("isUnclass"):
+            target_date = latest_unclass_date
+        else:
+            target_date = latest_class_date
+        last_date = record.get("lastDate") or ""
+        record["isActive"] = bool(last_date and (not target_date or last_date == target_date))
 
     # Build peer medians + percentiles
     peer_median_map = {}
@@ -368,6 +408,14 @@ def main():
         idx["_colaMissedLabels"] = cola_missed
         idx["_colaMissing"] = (not cola_received and cola_checked > 0)
 
+    # Include full data-flag status for search filtering.
+    idx_by_name = {r.get("name"): r for r in search_index}
+    for name, idx in index.items():
+        rec = idx_by_name.get(name)
+        if not rec:
+            continue
+        rec["hasFlags"] = bool(idx.get("_payMissing") or idx.get("_colaMissing"))
+
     history_stats = sorted(stats_map.values(), key=lambda x: x["date"])
     snapshot_dates_sorted = sorted(snapshot_dates)
     class_transitions_sorted = sorted(class_transitions.values(), key=lambda x: x["year"])
@@ -386,6 +434,8 @@ def main():
         json.dump(index, f, ensure_ascii=False)
     with open(AGG_PATH, "w", encoding="utf-8") as f:
         json.dump(aggregates, f, ensure_ascii=False)
+    with open(SEARCH_INDEX_PATH, "w", encoding="utf-8") as f:
+        json.dump({"records": search_index}, f, ensure_ascii=False)
 
     for bucket, bucket_data in buckets.items():
         out_path = os.path.join(PEOPLE_DIR, f"{bucket}.json")
@@ -394,6 +444,7 @@ def main():
 
     print(f"Wrote index: {INDEX_PATH}")
     print(f"Wrote aggregates: {AGG_PATH}")
+    print(f"Wrote search index: {SEARCH_INDEX_PATH}")
     print(f"Wrote {len(buckets)} bucket files in {PEOPLE_DIR}")
 
 

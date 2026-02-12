@@ -34,7 +34,10 @@ const COLA_EVENTS = [
 
 const DATA_INDEX_URL = 'data/index.json';
 const DATA_AGG_URL = 'data/aggregates.json';
+const DATA_SEARCH_URL = 'data/search-index.json';
 const DATA_BUCKET_DIR = 'data/people';
+const SEARCH_ANALYTICS_MAX_QUERY_LEN = 120;
+const SEARCH_EVENT_MIN_INTERVAL_MS = 1200;
 
 const getInflationMap = () => window.INFLATION_INDEX_BY_MONTH || {};
 const getInflationBaseMonth = () => window.INFLATION_BASE_MONTH || '';
@@ -63,6 +66,35 @@ const escapeForSingleQuote = (value) => {
 const escapeHtmlAttr = (value) => {
     if (value === null || value === undefined) return '';
     return value.toString().replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+};
+
+const escapeHtml = (value) => {
+    if (value === null || value === undefined) return '';
+    return value.toString()
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+};
+
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const highlightText = (text, terms) => {
+    const raw = (text || '').toString();
+    const safeTerms = (terms || [])
+        .map(t => (t || '').toString().trim())
+        .filter(Boolean)
+        .filter(t => t.length > 1)
+        .slice(0, 12);
+    if (!safeTerms.length) return escapeHtml(raw);
+    const pattern = safeTerms.map(escapeRegex).join('|');
+    if (!pattern) return escapeHtml(raw);
+    const regex = new RegExp(`(${pattern})`, 'ig');
+    return raw.split(regex).map((part, idx) => {
+        if (idx % 2 === 1) return `<mark class="search-hit">${escapeHtml(part)}</mark>`;
+        return escapeHtml(part);
+    }).join('');
 };
 
 const calculateSnapshotPay = (snapshot) => {
@@ -387,6 +419,73 @@ const getSearchSuggestions = (term, limit = 6) => {
     return results;
 };
 
+const buildWorkerBaseKey = (names) => {
+    if (!Array.isArray(names) || names.length === 0) return 'empty';
+    return `${names.length}:${names[0]}:${names[names.length - 1]}`;
+};
+
+const initSearchWorker = () => {
+    if (typeof Worker === 'undefined') return;
+    try {
+        const worker = new Worker('js/search-worker.js');
+        state.searchWorker = worker;
+        state.searchWorkerReady = false;
+        state.searchWorkerErrored = false;
+
+        worker.onmessage = (event) => {
+            const msg = event.data || {};
+            const id = msg.id;
+            if (msg.type === 'ready') {
+                state.searchWorkerReady = true;
+                runSearch();
+                return;
+            }
+            if (msg.type === 'error') {
+                state.searchWorkerErrored = true;
+                state.searchWorkerReady = false;
+                if (id && state.searchPending.has(id)) {
+                    const pending = state.searchPending.get(id);
+                    state.searchPending.delete(id);
+                    pending.reject(new Error(msg.message || 'Search worker error'));
+                }
+                return;
+            }
+            if (msg.type === 'result' && id && state.searchPending.has(id)) {
+                const pending = state.searchPending.get(id);
+                state.searchPending.delete(id);
+                pending.resolve(msg.payload || {});
+            }
+        };
+
+        worker.onerror = () => {
+            state.searchWorkerErrored = true;
+            state.searchWorkerReady = false;
+        };
+
+        const initId = `init:${Date.now()}`;
+        worker.postMessage({ type: 'init', id: initId, payload: { url: DATA_SEARCH_URL } });
+    } catch (err) {
+        state.searchWorkerErrored = true;
+        state.searchWorkerReady = false;
+    }
+};
+
+const sendSearchToWorker = (payload) => {
+    if (!state.searchWorker || !state.searchWorkerReady) {
+        return Promise.reject(new Error('Search worker unavailable'));
+    }
+    const id = `search:${++state.searchRequestSeq}`;
+    return new Promise((resolve, reject) => {
+        state.searchPending.set(id, { resolve, reject });
+        state.searchWorker.postMessage({ type: 'search', id, payload });
+        setTimeout(() => {
+            if (!state.searchPending.has(id)) return;
+            state.searchPending.delete(id);
+            reject(new Error('Search worker timeout'));
+        }, 5000);
+    });
+};
+
 const medianOf = (arr) => {
     if (!arr || arr.length === 0) return 0;
     const sorted = arr.slice().sort((a, b) => a - b);
@@ -569,6 +668,26 @@ const state = {
     historicalChartsRendered: false,
     exclusionTransitionMap: {},
     exclusionTransitionsReady: false,
+    transitionChart: null,
+    transitionMemberIndex: null,
+    transitionIndexPromise: null,
+    searchWorker: null,
+    searchWorkerReady: false,
+    searchWorkerErrored: false,
+    searchRequestSeq: 0,
+    searchRunToken: 0,
+    searchPending: new Map(),
+    lastSearchSuggestions: [],
+    lastHighlightTerms: [],
+    regexMode: false,
+    searchWarning: '',
+    autocompleteItems: [],
+    autocompleteFocus: -1,
+    analytics: {
+        nextSearchSource: 'unknown',
+        lastSearchSignature: '',
+        lastSearchTs: 0
+    },
     filters: {
         text: '',
         type: 'all',
@@ -579,13 +698,16 @@ const state = {
         sort: 'name-asc',   // Default sort: A-Z
         fullTimeOnly: false, // Default: Show all FTEs
         dataFlagsOnly: false,
-        exclusionsMode: 'off' // off | all | recent
+        exclusionsMode: 'off', // off | all | recent
+        transition: null // { year, direction } where direction is toUnclassified | toClassified
     }
 };
 
 const els = {
     searchInput: document.getElementById('search'),
     clearBtn: document.getElementById('clear-search'),
+    regexPill: document.getElementById('regex-pill'),
+    autocomplete: document.getElementById('search-autocomplete'),
     typeSelect: document.getElementById('type-filter'),
     roleInput: document.getElementById('role-filter'),
     salaryMin: document.getElementById('salary-min'),
@@ -613,6 +735,85 @@ const els = {
     roleDonut: document.getElementById('role-donut'),
     roleLegend: document.getElementById('role-legend')
 };
+
+function captureAnalyticsEvent(eventName, properties = {}) {
+    if (!window.posthog || typeof window.posthog.capture !== 'function') return;
+    try {
+        window.posthog.capture(eventName, properties);
+    } catch (err) {
+        // Analytics must never break UI interactions.
+    }
+}
+
+function setSearchSource(source) {
+    state.analytics.nextSearchSource = source || 'unknown';
+}
+
+function consumeSearchSource() {
+    const source = state.analytics.nextSearchSource || 'unknown';
+    state.analytics.nextSearchSource = 'unknown';
+    return source;
+}
+
+function hasActiveSearchFilters() {
+    const filters = state.filters;
+    return !!(
+        (filters.text && filters.text.trim()) ||
+        filters.type !== 'all' ||
+        (filters.role && filters.role.trim()) ||
+        filters.minSalary !== null ||
+        filters.maxSalary !== null ||
+        filters.showInactive ||
+        filters.sort !== 'name-asc' ||
+        filters.fullTimeOnly ||
+        filters.dataFlagsOnly ||
+        filters.exclusionsMode !== 'off' ||
+        !!filters.transition
+    );
+}
+
+function trackSearchEvent(resultCount) {
+    const source = consumeSearchSource();
+    if (!hasActiveSearchFilters()) return;
+
+    const query = (state.filters.text || '').trim();
+    const payload = {
+        source,
+        query: query.slice(0, SEARCH_ANALYTICS_MAX_QUERY_LEN),
+        query_length: query.length,
+        result_count: resultCount,
+        regex_mode: !!state.regexMode,
+        type_filter: state.filters.type,
+        show_inactive: !!state.filters.showInactive,
+        full_time_only: !!state.filters.fullTimeOnly,
+        data_flags_only: !!state.filters.dataFlagsOnly,
+        exclusions_mode: state.filters.exclusionsMode || 'off',
+        sort_order: state.filters.sort || 'name-asc',
+        has_transition_filter: !!state.filters.transition
+    };
+
+    const signature = JSON.stringify({
+        query: payload.query,
+        query_length: payload.query_length,
+        result_count: payload.result_count,
+        regex_mode: payload.regex_mode,
+        type_filter: payload.type_filter,
+        show_inactive: payload.show_inactive,
+        full_time_only: payload.full_time_only,
+        data_flags_only: payload.data_flags_only,
+        exclusions_mode: payload.exclusions_mode,
+        sort_order: payload.sort_order,
+        has_transition_filter: payload.has_transition_filter
+    });
+    const now = Date.now();
+    if (signature === state.analytics.lastSearchSignature && (now - state.analytics.lastSearchTs) < SEARCH_EVENT_MIN_INTERVAL_MS) {
+        return;
+    }
+
+    state.analytics.lastSearchSignature = signature;
+    state.analytics.lastSearchTs = now;
+    captureAnalyticsEvent('search_performed', payload);
+}
 
 // ==========================================
 // INITIALIZATION
@@ -662,10 +863,12 @@ Promise.all([
         const roles = aggregates.allRoles || [];
         els.roleDatalist.innerHTML = roles.map(r => `<option value="${r}">`).join('');
         state.searchIndex = buildSearchIndex(state.masterKeys, roles);
+        initSearchWorker();
 
         renderSuggestedSearches();
 
         const targetName = parseUrlParams();
+        setSearchSource(state.filters.text ? 'url_param' : 'initial_load');
         runSearch();
         updateStats();
         setupInfiniteScroll();
@@ -812,7 +1015,7 @@ function renderInteractiveCharts(history) {
 
     const transitions = state.classTransitions || [];
     if (transitions.length) {
-        new Chart(document.getElementById('chart-transitions').getContext('2d'), {
+        state.transitionChart = new Chart(document.getElementById('chart-transitions').getContext('2d'), {
             type: 'bar',
             data: {
                 labels: transitions.map(d => d.year),
@@ -829,7 +1032,22 @@ function renderInteractiveCharts(history) {
                     }
                 ]
             },
-            options: commonOptions
+            options: {
+                ...commonOptions,
+                onClick: (_, activeElements) => {
+                    if (!activeElements || !activeElements.length) return;
+                    const { index, datasetIndex } = activeElements[0];
+                    const point = transitions[index];
+                    if (!point) return;
+                    const direction = datasetIndex === 0 ? 'toUnclassified' : 'toClassified';
+                    applyTransitionFilter(point.year, direction);
+                },
+                onHover: (event, activeElements) => {
+                    const canvas = event?.native?.target;
+                    if (!canvas) return;
+                    canvas.style.cursor = (activeElements && activeElements.length) ? 'pointer' : 'default';
+                }
+            }
         });
     }
 
@@ -973,6 +1191,7 @@ function hasInactiveSearchMatch(term) {
 window.showFormerEmployeesInSearch = function() {
     state.filters.showInactive = true;
     if (els.inactiveToggle) els.inactiveToggle.checked = true;
+    setSearchSource('show_former_suggestion');
     runSearch();
 };
 
@@ -1328,14 +1547,44 @@ function buildTrendInsights({
 // ==========================================
 // SEARCH & FILTER LOGIC
 // ==========================================
-window.applySearch = function(term) {
+window.applySearch = function(term, source = 'search_apply') {
     els.searchInput.value = term;
     state.filters.text = term;
-    els.clearBtn.classList.remove('hidden');
+    els.clearBtn.classList.toggle('hidden', !term);
+    hideAutocomplete();
+    setSearchSource(source);
     runSearch();
 };
 
-function runSearch() {
+function buildWorkerPayload(baseKeys, transitionSet) {
+    return {
+        query: state.filters.text || '',
+        roleFilter: (state.filters.role || '').trim().toLowerCase(),
+        minSalary: state.filters.minSalary,
+        maxSalary: state.filters.maxSalary,
+        dataFlagsOnly: !!state.filters.dataFlagsOnly,
+        exclusionsMode: state.filters.exclusionsMode || 'off',
+        sort: state.filters.sort || 'name-asc',
+        transitionNames: transitionSet ? Array.from(transitionSet) : null,
+        transitionKey: state.filters.transition ? `${state.filters.transition.year}|${state.filters.transition.direction}` : '',
+        baseKey: buildWorkerBaseKey(baseKeys),
+        baseNames: baseKeys,
+        nowTs: Date.now()
+    };
+}
+
+function applySearchResults(results) {
+    state.filteredKeys = results;
+    state.visibleCount = state.batchSize;
+    state.focusIndex = -1;
+    renderInitial();
+    updateStats();
+    updateDashboard(calculateStats(state.filteredKeys));
+    updateSearchSuggestions();
+    trackSearchEvent(results.length);
+}
+
+function runSearchLegacy(baseKeys = null, transitionSet = null) {
     // If user asked for recent exclusions but transition map not ready, compute then rerun.
     if (state.filters.exclusionsMode === 'recent' && !state.exclusionTransitionsReady) {
         computeExclusionTransitions().then(() => runSearch());
@@ -1344,11 +1593,12 @@ function runSearch() {
 
     const term = state.filters.text.toLowerCase();
     const roleFilter = state.filters.role.toLowerCase();
-    const { minSalary, maxSalary, sort, dataFlagsOnly, exclusionsMode } = state.filters;
+    const { minSalary, maxSalary, sort, dataFlagsOnly, exclusionsMode, transition } = state.filters;
+    const localTransitionSet = transitionSet || (transition && state.transitionMemberIndex ? state.transitionMemberIndex[`${transition.year}|${transition.direction}`] : null);
 
     // 1. FILTERING
-    const baseKeys = getBaseKeys();
-    let results = baseKeys.filter(name => {
+    const keys = baseKeys || getBaseKeys();
+    let results = keys.filter(name => {
         const person = state.masterData[name];
 
         // Search Text
@@ -1386,6 +1636,11 @@ function runSearch() {
                 if (!ts || ts < cutoff) return false;
             }
         }
+
+        // Transition filter from "Classification Transitions" chart.
+        if (transition) {
+            if (!localTransitionSet || !localTransitionSet.has(name)) return false;
+        }
         return true;
     });
 
@@ -1411,13 +1666,50 @@ function runSearch() {
         }
     });
 
-    state.filteredKeys = results;
-    state.visibleCount = state.batchSize;
-    state.focusIndex = -1;
-    renderInitial();
-    updateStats();
-    updateDashboard(calculateStats(state.filteredKeys));
-    updateSearchSuggestions();
+    applySearchResults(results);
+}
+
+function runSearch() {
+    // If user asked for recent exclusions but transition map not ready, compute then rerun.
+    if (state.filters.exclusionsMode === 'recent' && !state.exclusionTransitionsReady) {
+        computeExclusionTransitions().then(() => runSearch());
+        return;
+    }
+
+    const transition = state.filters.transition;
+    const transitionKey = transition ? `${transition.year}|${transition.direction}` : null;
+    const transitionSet = transitionKey && state.transitionMemberIndex ? state.transitionMemberIndex[transitionKey] : null;
+    const baseKeys = getBaseKeys();
+
+    updateSearchUrl();
+
+    if (!state.searchWorker || !state.searchWorkerReady || state.searchWorkerErrored) {
+        hideAutocomplete();
+        runSearchLegacy(baseKeys, transitionSet);
+        updateRegexPill(false, '');
+        return;
+    }
+
+    const token = ++state.searchRunToken;
+    sendSearchToWorker(buildWorkerPayload(baseKeys, transitionSet))
+        .then(payload => {
+            if (token !== state.searchRunToken) return;
+            const names = (payload.names || []).filter(name => !!state.masterData[name]);
+            state.lastSearchSuggestions = payload.suggestions || [];
+            state.lastHighlightTerms = payload.highlightTerms || [];
+            state.searchWarning = payload.warning || '';
+            state.regexMode = !!payload.regexMode;
+            updateRegexPill(!!payload.regexMode, payload.warning || '');
+            renderAutocomplete(state.lastSearchSuggestions);
+            applySearchResults(names);
+        })
+        .catch(() => {
+            if (token !== state.searchRunToken) return;
+            state.searchWorkerErrored = true;
+            hideAutocomplete();
+            runSearchLegacy(baseKeys, transitionSet);
+            updateRegexPill(false, '');
+        });
 }
 
 function updateSearchSuggestions() {
@@ -1429,7 +1721,9 @@ function updateSearchSuggestions() {
         return;
     }
     const suggestFormer = !state.filters.showInactive && hasInactiveSearchMatch(term);
-    const suggestions = getSearchSuggestions(term);
+    const suggestions = state.lastSearchSuggestions && state.lastSearchSuggestions.length
+        ? state.lastSearchSuggestions
+        : getSearchSuggestions(term);
     if (!suggestions.length && !suggestFormer) {
         container.classList.add('hidden');
         return;
@@ -1444,12 +1738,90 @@ function updateSearchSuggestions() {
                 </button>
             ` : ''}
             ${suggestions.map(item => `
-                <button class="suggestion-chip" data-tooltip="Suggested ${item.type}" onclick="applySearch('${escapeForSingleQuote(item.value)}')">
-                    ${item.value}
+                <button class="suggestion-chip" data-tooltip="Suggested ${item.type}" onclick="applySearch('${escapeForSingleQuote(item.value)}', 'search_suggestion')">
+                    ${escapeHtml(item.value)}
                 </button>
             `).join('')}
         </div>
     `;
+}
+
+function updateRegexPill(isRegex, warningText) {
+    if (!els.regexPill) return;
+    if (!isRegex) {
+        els.regexPill.classList.add('hidden');
+        els.regexPill.removeAttribute('data-tooltip');
+        return;
+    }
+    els.regexPill.classList.remove('hidden');
+    if (warningText) {
+        els.regexPill.setAttribute('data-tooltip', warningText);
+    } else {
+        els.regexPill.setAttribute('data-tooltip', 'Regex mode enabled. Use /pattern/flags syntax.');
+    }
+}
+
+function hideAutocomplete() {
+    state.autocompleteItems = [];
+    state.autocompleteFocus = -1;
+    if (!els.autocomplete) return;
+    els.autocomplete.classList.add('hidden');
+    els.autocomplete.innerHTML = '';
+}
+
+function renderAutocomplete(items) {
+    if (!els.autocomplete) return;
+    const term = (state.filters.text || '').trim();
+    if (!term || !items || items.length === 0) {
+        hideAutocomplete();
+        return;
+    }
+    state.autocompleteItems = items.slice(0, 8);
+    state.autocompleteFocus = -1;
+    els.autocomplete.classList.remove('hidden');
+    els.autocomplete.innerHTML = state.autocompleteItems.map((item, idx) => `
+        <button class="autocomplete-item" data-idx="${idx}" data-value="${escapeHtmlAttr(item.value || '')}" role="option" aria-selected="false">
+            <span>${escapeHtml(item.value || '')}</span>
+            <span class="autocomplete-type">${escapeHtml(item.type || 'suggestion')}</span>
+        </button>
+    `).join('');
+}
+
+function applyAutocompleteIndex(idx) {
+    if (idx < 0 || idx >= state.autocompleteItems.length) return;
+    const item = state.autocompleteItems[idx];
+    if (!item) return;
+    captureAnalyticsEvent('search_autocomplete_selected', {
+        value: (item.value || '').slice(0, SEARCH_ANALYTICS_MAX_QUERY_LEN),
+        suggestion_type: item.type || 'suggestion',
+        query: (state.filters.text || '').trim().slice(0, SEARCH_ANALYTICS_MAX_QUERY_LEN)
+    });
+    window.applySearch(item.value || '', 'autocomplete');
+    hideAutocomplete();
+}
+
+function stepAutocomplete(delta) {
+    if (!state.autocompleteItems.length) return;
+    const len = state.autocompleteItems.length;
+    state.autocompleteFocus = (state.autocompleteFocus + delta + len) % len;
+    if (!els.autocomplete) return;
+    els.autocomplete.querySelectorAll('.autocomplete-item').forEach((node, idx) => {
+        const isActive = idx === state.autocompleteFocus;
+        node.classList.toggle('active', isActive);
+        node.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+}
+
+function updateSearchUrl() {
+    const query = (state.filters.text || '').trim();
+    const url = new URL(window.location.href);
+    if (query) {
+        url.searchParams.set('q', query);
+    } else {
+        url.searchParams.delete('q');
+    }
+    if (url.searchParams.has('name')) url.searchParams.delete('name');
+    window.history.replaceState({ path: url.href }, '', url.href);
 }
 
 // ==========================================
@@ -1677,6 +2049,9 @@ function generateCardHTML(name, idx) {
     if (!person._hasTimeline) return '';
     
     const lastJob = person._lastJob || {};
+    const highlightedName = highlightText(name, state.lastHighlightTerms);
+    const highlightedHomeOrg = highlightText(person.Meta["Home Orgn"] || 'N/A', state.lastHighlightTerms);
+    const highlightedRole = highlightText(lastJob['Job Title'] || 'Unknown', state.lastHighlightTerms);
     
     const cardId = `card-${idx}`;
     const historyId = `history-${idx}`;
@@ -1720,15 +2095,15 @@ function generateCardHTML(name, idx) {
         <div class="card-header" onclick="toggleCard('${cardId}')" onkeydown="handleCardKey(event, '${cardId}')" tabindex="0" role="button" aria-expanded="false" aria-controls="${historyId}">
             <div class="person-info">
                 <div class="name-header">
-                    <h2>${name} ${badgeHTML} ${colaWarningHTML} ${exclusionWarningHTML}</h2>
+                    <h2>${highlightedName} ${badgeHTML} ${colaWarningHTML} ${exclusionWarningHTML}</h2>
                     <button class="link-btn-card" data-linkname="${attrName}" onclick="copyLink(event, this.dataset.linkname)" aria-label="Copy link">🔗</button>
                     <button class="link-btn-card report-btn" data-report-name="${escapeHtmlAttr(name)}" data-tooltip="Report a data issue" aria-label="Report a data issue">!</button>
                 </div>
-                <p>Home Org: ${person.Meta["Home Orgn"] || 'N/A'}</p>
+                <p>Home Org: ${highlightedHomeOrg}</p>
             </div>
             <div class="latest-stat">
                 <div class="latest-salary" data-tooltip="${totalPayTooltip}">${totalPayLabel}</div>
-                <div class="latest-role">${lastJob['Job Title'] || 'Unknown'}</div>
+                <div class="latest-role">${highlightedRole}</div>
                 ${dataFlagHTML}
             </div>
         </div>
@@ -1776,7 +2151,26 @@ function loadAndRenderPersonDetails(cardEl) {
 function renderInitial() {
     destroyPersonCharts();
     const keys = state.filteredKeys.slice(0, state.visibleCount);
-    if (keys.length === 0) { els.results.innerHTML = `<p style="text-align:center; color:#888;">No matching records found.</p>`; return; }
+    if (keys.length === 0) {
+        const suggestFormer = !state.filters.showInactive && hasInactiveSearchMatch(state.filters.text || '');
+        const quickSuggestions = (state.lastSearchSuggestions || []).slice(0, 4);
+        const formerBtn = suggestFormer
+            ? `<button class="suggestion-chip" onclick="showFormerEmployeesInSearch()">Show former employees</button>`
+            : '';
+        const suggestionBtns = quickSuggestions.map(item => `
+            <button class="suggestion-chip" onclick="applySearch('${escapeForSingleQuote(item.value || '')}', 'search_suggestion')">${escapeHtml(item.value || '')}</button>
+        `).join('');
+        const warning = state.searchWarning ? `<div class="suggestions-title">${escapeHtml(state.searchWarning)}</div>` : '';
+        els.results.innerHTML = `
+            <div class="no-results-panel">
+                <div class="no-results-title">No matching records found.</div>
+                ${warning}
+                <div>Try broader terms or field syntax such as <code>org:engineering</code> and <code>pay:60k-90k</code>.</div>
+                <div class="no-results-actions">${formerBtn}${suggestionBtns}</div>
+            </div>
+        `;
+        return;
+    }
     els.results.innerHTML = keys.map((name, idx) => generateCardHTML(name, idx)).join('') + getSentinel();
     observeSentinel();
 }
@@ -1805,7 +2199,104 @@ function appendNextBatch() {
 }
 
 const getSentinel = () => `<div id="scroll-sentinel" class="loader-sentinel">${state.visibleCount < state.filteredKeys.length ? 'Loading more...' : 'End of results'}</div>`;
-function updateStats() { els.stats.innerHTML = `Found ${state.filteredKeys.length} matching personnel records.`; }
+function getTransitionFilterLabel() {
+    const transition = state.filters.transition;
+    if (!transition) return '';
+    const directionLabel = transition.direction === 'toUnclassified'
+        ? 'Classified -> Unclassified'
+        : 'Unclassified -> Classified';
+    return `${directionLabel} in ${transition.year}`;
+}
+function updateStats() {
+    const transitionLabel = getTransitionFilterLabel();
+    const transitionText = transitionLabel ? ` (Transition filter: ${transitionLabel})` : '';
+    const warning = state.searchWarning ? ` ${escapeHtml(state.searchWarning)}` : '';
+    els.stats.innerHTML = `Found ${state.filteredKeys.length} matching personnel records.${transitionText}${warning}`;
+}
+
+function getClassStateFromSource(source) {
+    const src = (source || '').toLowerCase();
+    const isUnclass = src.includes('unclass');
+    const isClassified = src.includes('class') && !isUnclass;
+    if (isUnclass) return 'unclassified';
+    if (isClassified) return 'classified';
+    return null;
+}
+
+function computeTransitionMemberIndex() {
+    if (state.transitionMemberIndex) return Promise.resolve(state.transitionMemberIndex);
+    if (state.transitionIndexPromise) return state.transitionIndexPromise;
+
+    const buckets = [...new Set(state.masterKeys.map(bucketForName))];
+    state.transitionIndexPromise = Promise.all(buckets.map(loadBucket))
+        .then(bucketDataList => {
+            const index = {};
+
+            const add = (year, direction, name) => {
+                if (!year || !direction || !name) return;
+                const key = `${year}|${direction}`;
+                if (!index[key]) index[key] = new Set();
+                index[key].add(name);
+            };
+
+            bucketDataList.forEach(bucketData => {
+                Object.entries(bucketData).forEach(([name, person]) => {
+                    if (!person || !person.Timeline || person.Timeline.length < 2) return;
+                    hydratePersonDetail(person);
+
+                    let prevState = null;
+                    person.Timeline.forEach(snap => {
+                        const currentState = getClassStateFromSource(snap.Source);
+                        if (!currentState) return;
+                        if (prevState && prevState !== currentState) {
+                            const year = new Date(snap.Date).getFullYear();
+                            if (!isNaN(year)) {
+                                const direction = currentState === 'unclassified' ? 'toUnclassified' : 'toClassified';
+                                add(year, direction, name);
+                            }
+                        }
+                        prevState = currentState;
+                    });
+                });
+            });
+
+            state.transitionMemberIndex = index;
+            return index;
+        })
+        .catch(err => {
+            console.error('Failed to build transition member index', err);
+            throw err;
+        })
+        .finally(() => {
+            state.transitionIndexPromise = null;
+        });
+
+    return state.transitionIndexPromise;
+}
+
+function applyTransitionFilter(year, direction) {
+    const current = state.filters.transition;
+    const isSame = current && current.year === year && current.direction === direction;
+    if (isSame) {
+        state.filters.transition = null;
+        setSearchSource('transition_filter');
+        runSearch();
+        return;
+    }
+
+    els.stats.innerHTML = 'Loading transition worker list...';
+    computeTransitionMemberIndex()
+        .then(() => {
+            state.filters.transition = { year, direction };
+            setSearchSource('transition_filter');
+            runSearch();
+        })
+        .catch(() => {
+            state.filters.transition = null;
+            setSearchSource('transition_filter');
+            runSearch();
+        });
+}
 function toggleCard(id) {
     const el = document.getElementById(id);
     if (!el) return;
@@ -1813,6 +2304,12 @@ function toggleCard(id) {
     const expanded = el.classList.contains('expanded');
     el.querySelector('.card-header')?.setAttribute('aria-expanded', expanded);
     if (expanded) {
+        const name = el.getAttribute('data-name') || '';
+        captureAnalyticsEvent('person_card_opened', {
+            person_name: name,
+            query: (state.filters.text || '').trim().slice(0, SEARCH_ANALYTICS_MAX_QUERY_LEN),
+            result_count: state.filteredKeys.length
+        });
         loadAndRenderPersonDetails(el).then(() => ensurePersonChart(el));
     }
 }
@@ -1878,21 +2375,114 @@ function setupInfiniteScroll() {
 function observeSentinel() { const s = document.getElementById('scroll-sentinel'); if (s && observer) observer.observe(s); }
 
 function debounce(func, wait) { let timeout; return function(...args) { clearTimeout(timeout); timeout = setTimeout(() => func.apply(this, args), wait); }; }
-const handleSearch = debounce(() => { state.filters.text = els.searchInput.value; runSearch(); }, 300);
+const handleSearch = debounce(() => {
+    state.filters.text = els.searchInput.value;
+    setSearchSource('search_input');
+    runSearch();
+}, 250);
 
-els.searchInput.addEventListener('input', (e) => { els.clearBtn.classList.toggle('hidden', !e.target.value); handleSearch(); });
-els.clearBtn.addEventListener('click', () => { els.searchInput.value = ''; els.clearBtn.classList.add('hidden'); state.filters.text = ''; runSearch(); els.searchInput.focus(); });
-els.typeSelect.addEventListener('change', (e) => { state.filters.type = e.target.value; runSearch(); });
-els.roleInput.addEventListener('input', debounce((e) => { state.filters.role = e.target.value; runSearch(); }, 300));
-els.salaryMin.addEventListener('input', debounce((e) => { state.filters.minSalary = parseFloat(e.target.value) || null; runSearch(); }, 300));
-els.salaryMax.addEventListener('input', debounce((e) => { state.filters.maxSalary = parseFloat(e.target.value) || null; runSearch(); }, 300));
-els.inactiveToggle.addEventListener('change', (e) => { state.filters.showInactive = e.target.checked; runSearch(); });
-els.sortSelect.addEventListener('change', (e) => { state.filters.sort = e.target.value; runSearch(); });
-els.fteToggle.addEventListener('change', (e) => { state.filters.fullTimeOnly = e.target.checked; runSearch(); });
-els.dataFlagsToggle.addEventListener('change', (e) => { state.filters.dataFlagsOnly = e.target.checked; runSearch(); });
+els.searchInput.addEventListener('input', (e) => {
+    els.clearBtn.classList.toggle('hidden', !e.target.value);
+    handleSearch();
+});
+els.searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' && state.autocompleteItems.length) {
+        e.preventDefault();
+        stepAutocomplete(1);
+        return;
+    }
+    if (e.key === 'ArrowUp' && state.autocompleteItems.length) {
+        e.preventDefault();
+        stepAutocomplete(-1);
+        return;
+    }
+    if ((e.key === 'Enter' || e.key === 'Tab') && state.autocompleteItems.length && state.autocompleteFocus >= 0) {
+        e.preventDefault();
+        applyAutocompleteIndex(state.autocompleteFocus);
+        return;
+    }
+    if (e.key === 'Escape') {
+        hideAutocomplete();
+    }
+});
+
+if (els.autocomplete) {
+    els.autocomplete.addEventListener('mousedown', (e) => {
+        const item = e.target.closest('.autocomplete-item');
+        if (!item) return;
+        e.preventDefault();
+        const idx = parseInt(item.dataset.idx || '-1', 10);
+        applyAutocompleteIndex(idx);
+    });
+}
+
+document.addEventListener('click', (e) => {
+    if (!els.autocomplete || els.autocomplete.classList.contains('hidden')) return;
+    if (e.target === els.searchInput || e.target.closest('#search-autocomplete')) return;
+    hideAutocomplete();
+});
+
+els.clearBtn.addEventListener('click', () => {
+    const previousQuery = (state.filters.text || '').trim();
+    captureAnalyticsEvent('search_cleared', {
+        query: previousQuery.slice(0, SEARCH_ANALYTICS_MAX_QUERY_LEN),
+        query_length: previousQuery.length
+    });
+    els.searchInput.value = '';
+    els.clearBtn.classList.add('hidden');
+    state.filters.text = '';
+    state.lastHighlightTerms = [];
+    state.searchWarning = '';
+    updateRegexPill(false, '');
+    hideAutocomplete();
+    setSearchSource('clear_search');
+    runSearch();
+    els.searchInput.focus();
+});
+els.typeSelect.addEventListener('change', (e) => {
+    state.filters.type = e.target.value;
+    setSearchSource('filter_change');
+    runSearch();
+});
+els.roleInput.addEventListener('input', debounce((e) => {
+    state.filters.role = e.target.value;
+    setSearchSource('filter_change');
+    runSearch();
+}, 300));
+els.salaryMin.addEventListener('input', debounce((e) => {
+    state.filters.minSalary = parseFloat(e.target.value) || null;
+    setSearchSource('filter_change');
+    runSearch();
+}, 300));
+els.salaryMax.addEventListener('input', debounce((e) => {
+    state.filters.maxSalary = parseFloat(e.target.value) || null;
+    setSearchSource('filter_change');
+    runSearch();
+}, 300));
+els.inactiveToggle.addEventListener('change', (e) => {
+    state.filters.showInactive = e.target.checked;
+    setSearchSource('filter_change');
+    runSearch();
+});
+els.sortSelect.addEventListener('change', (e) => {
+    state.filters.sort = e.target.value;
+    setSearchSource('filter_change');
+    runSearch();
+});
+els.fteToggle.addEventListener('change', (e) => {
+    state.filters.fullTimeOnly = e.target.checked;
+    setSearchSource('filter_change');
+    runSearch();
+});
+els.dataFlagsToggle.addEventListener('change', (e) => {
+    state.filters.dataFlagsOnly = e.target.checked;
+    setSearchSource('filter_change');
+    runSearch();
+});
 if (els.exclusionsMode) {
     els.exclusionsMode.addEventListener('change', (e) => {
         state.filters.exclusionsMode = e.target.value;
+        setSearchSource('filter_change');
         runSearch();
     });
 }
@@ -1939,6 +2529,7 @@ function setupHistoricalChartsToggle() {
         wrapper.classList.toggle('hidden', !nextExpanded ? true : false);
         wrapper.setAttribute('aria-hidden', String(!nextExpanded));
         toggle.textContent = nextExpanded ? 'Hide historical charts' : 'Show historical charts';
+        captureAnalyticsEvent('historical_charts_toggled', { expanded: nextExpanded });
 
         if (nextExpanded && !state.historicalChartsRendered) {
             renderInteractiveCharts(state.historyStats);
@@ -1964,10 +2555,12 @@ function setupHotkeys() {
                 modal.classList.add('hidden');
                 return;
             }
+            hideAutocomplete();
             if (els.searchInput.value) {
                 els.searchInput.value = '';
                 els.clearBtn.classList.add('hidden');
                 state.filters.text = '';
+                setSearchSource('clear_search');
                 runSearch();
             }
             return;
@@ -2049,8 +2642,17 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function parseUrlParams() {
-    const name = new URLSearchParams(window.location.search).get('name');
-    if (name) { state.filters.text = name; els.searchInput.value = name; els.clearBtn.classList.remove('hidden'); return name; }
+    const params = new URLSearchParams(window.location.search);
+    const query = params.get('q');
+    const name = params.get('name');
+    const target = query || name;
+    if (target) {
+        state.filters.text = target;
+        els.searchInput.value = target;
+        els.clearBtn.classList.remove('hidden');
+    }
+    if (query) return null;
+    if (name) return name;
     return null;
 }
 function autoExpandTarget(name) {
@@ -2065,10 +2667,18 @@ function copyLink(e, name) {
     e.stopPropagation();
     const url = new URL(window.location.href); url.searchParams.set('name', name);
     window.history.pushState({ path: url.href }, '', url.href);
+    captureAnalyticsEvent('person_link_copied', {
+        person_name: name,
+        query: (state.filters.text || '').trim().slice(0, SEARCH_ANALYTICS_MAX_QUERY_LEN)
+    });
     navigator.clipboard.writeText(url.href).then(() => showToast(`Link copied for ${name}`)).catch(console.error);
 }
 
 function openCorrectionIssue(name) {
+    captureAnalyticsEvent('correction_issue_opened', {
+        person_name: name || 'Unknown',
+        query: (state.filters.text || '').trim().slice(0, SEARCH_ANALYTICS_MAX_QUERY_LEN)
+    });
     const base = 'https://github.com/jaxsnjohnson/osu-sal-report-data-and-site/issues/new';
     const safeName = name || 'Unknown';
     const title = `Data correction request: ${safeName}`;
@@ -2092,6 +2702,6 @@ function showToast(msg) {
 function renderSuggestedSearches() {
     if (!els.suggestedSearches) return;
     els.suggestedSearches.innerHTML = ['Professor', 'Athletics', 'Physics', 'Coach', 'Dean'].map(term =>
-        `<button class="chip" onclick="applySearch('${term}')">${term}</button>`
+        `<button class="chip" onclick="applySearch('${term}', 'suggested_chip')">${term}</button>`
     ).join('');
 }
