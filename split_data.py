@@ -14,6 +14,9 @@ COLA_EVENTS = [
 COLA_TOLERANCE_PCT = 0.4
 
 _NON_NUMERIC_RE = re.compile(r"[^0-9.-]+")
+_ASCII_NON_NUMERIC_DELETE_MAP = {
+    i: None for i in range(128) if chr(i) not in "0123456789.-"
+}
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 RAW_PATH = os.path.join(ROOT, "data.json")
@@ -29,7 +32,12 @@ def parse_float(val):
         return None
     if isinstance(val, (int, float)):
         return float(val)
-    cleaned = _NON_NUMERIC_RE.sub("", str(val))
+    s = str(val)
+    # Fast path for common ASCII input values; keeps regex fallback for exact behavior on non-ASCII.
+    if s.isascii():
+        cleaned = s.translate(_ASCII_NON_NUMERIC_DELETE_MAP)
+    else:
+        cleaned = _NON_NUMERIC_RE.sub("", s)
     if not cleaned:
         return None
     try:
