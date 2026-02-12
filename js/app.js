@@ -38,6 +38,7 @@ const DATA_SEARCH_URL = 'data/search-index.json';
 const DATA_BUCKET_DIR = 'data/people';
 const SEARCH_ANALYTICS_MAX_QUERY_LEN = 120;
 const SEARCH_EVENT_MIN_INTERVAL_MS = 1200;
+const ANALYTICS_EVENT_VERSION = 2;
 
 const getInflationMap = () => window.INFLATION_INDEX_BY_MONTH || {};
 const getInflationBaseMonth = () => window.INFLATION_BASE_MONTH || '';
@@ -737,11 +738,40 @@ const els = {
 };
 
 function captureAnalyticsEvent(eventName, properties = {}) {
+    if (window.__DISABLE_ANALYTICS__) return;
     if (!window.posthog || typeof window.posthog.capture !== 'function') return;
+    const query = (state.filters.text || '').trim();
+    const payload = {
+        event_version: ANALYTICS_EVENT_VERSION,
+        page: window.location.pathname || '/',
+        query: query.slice(0, SEARCH_ANALYTICS_MAX_QUERY_LEN),
+        query_length: query.length,
+        result_count: state.filteredKeys.length,
+        source: state.analytics.nextSearchSource || 'unknown',
+        dataset_latest_class_date: state.latestClassDate || '',
+        dataset_latest_unclass_date: state.latestUnclassDate || '',
+        has_active_filters: hasActiveSearchFilters(),
+        regex_mode: !!state.regexMode,
+        ...properties
+    };
     try {
-        window.posthog.capture(eventName, properties);
+        window.posthog.capture(eventName, payload);
     } catch (err) {
         // Analytics must never break UI interactions.
+    }
+}
+
+function registerAnalyticsContext() {
+    if (window.__DISABLE_ANALYTICS__) return;
+    if (!window.posthog || typeof window.posthog.register !== 'function') return;
+    try {
+        window.posthog.register({
+            event_version: ANALYTICS_EVENT_VERSION,
+            dataset_latest_class_date: state.latestClassDate || '',
+            dataset_latest_unclass_date: state.latestUnclassDate || ''
+        });
+    } catch (err) {
+        // Analytics context registration should be best effort only.
     }
 }
 
@@ -772,9 +802,29 @@ function hasActiveSearchFilters() {
     );
 }
 
-function trackSearchEvent(resultCount) {
+function isUserInitiatedSearchSource(source) {
+    return source !== 'initial_load';
+}
+
+function getResultBucket(resultCount) {
+    if (resultCount <= 0) return '0';
+    if (resultCount <= 5) return '1-5';
+    if (resultCount <= 25) return '6-25';
+    if (resultCount <= 100) return '26-100';
+    return '100+';
+}
+
+function trackFilterChanged(filterName, newValue) {
+    captureAnalyticsEvent('filter_changed', {
+        source: 'filter_change',
+        filter_name: filterName,
+        new_value: newValue
+    });
+}
+
+function trackSearchEvent(resultCount, meta = {}) {
     const source = consumeSearchSource();
-    if (!hasActiveSearchFilters()) return;
+    if (!isUserInitiatedSearchSource(source)) return;
 
     const query = (state.filters.text || '').trim();
     const payload = {
@@ -782,6 +832,9 @@ function trackSearchEvent(resultCount) {
         query: query.slice(0, SEARCH_ANALYTICS_MAX_QUERY_LEN),
         query_length: query.length,
         result_count: resultCount,
+        latency_ms: meta.latencyMs || 0,
+        used_worker: !!meta.usedWorker,
+        result_bucket: getResultBucket(resultCount),
         regex_mode: !!state.regexMode,
         type_filter: state.filters.type,
         show_inactive: !!state.filters.showInactive,
@@ -793,9 +846,12 @@ function trackSearchEvent(resultCount) {
     };
 
     const signature = JSON.stringify({
+        source: payload.source,
         query: payload.query,
         query_length: payload.query_length,
         result_count: payload.result_count,
+        used_worker: payload.used_worker,
+        result_bucket: payload.result_bucket,
         regex_mode: payload.regex_mode,
         type_filter: payload.type_filter,
         show_inactive: payload.show_inactive,
@@ -812,7 +868,11 @@ function trackSearchEvent(resultCount) {
 
     state.analytics.lastSearchSignature = signature;
     state.analytics.lastSearchTs = now;
+    captureAnalyticsEvent('search_executed', payload);
     captureAnalyticsEvent('search_performed', payload);
+    if (resultCount === 0) {
+        captureAnalyticsEvent('search_zero_results', payload);
+    }
 }
 
 // ==========================================
@@ -858,6 +918,7 @@ Promise.all([
         });
 
         buildKeyBucketsAndCola();
+        registerAnalyticsContext();
 
         // Populate Roles
         const roles = aggregates.allRoles || [];
@@ -1573,7 +1634,7 @@ function buildWorkerPayload(baseKeys, transitionSet) {
     };
 }
 
-function applySearchResults(results) {
+function applySearchResults(results, searchMeta = {}) {
     state.filteredKeys = results;
     state.visibleCount = state.batchSize;
     state.focusIndex = -1;
@@ -1581,10 +1642,10 @@ function applySearchResults(results) {
     updateStats();
     updateDashboard(calculateStats(state.filteredKeys));
     updateSearchSuggestions();
-    trackSearchEvent(results.length);
+    trackSearchEvent(results.length, searchMeta);
 }
 
-function runSearchLegacy(baseKeys = null, transitionSet = null) {
+function runSearchLegacy(baseKeys = null, transitionSet = null, searchStartedAt = Date.now()) {
     // If user asked for recent exclusions but transition map not ready, compute then rerun.
     if (state.filters.exclusionsMode === 'recent' && !state.exclusionTransitionsReady) {
         computeExclusionTransitions().then(() => runSearch());
@@ -1666,7 +1727,10 @@ function runSearchLegacy(baseKeys = null, transitionSet = null) {
         }
     });
 
-    applySearchResults(results);
+    applySearchResults(results, {
+        usedWorker: false,
+        latencyMs: Date.now() - searchStartedAt
+    });
 }
 
 function runSearch() {
@@ -1680,12 +1744,13 @@ function runSearch() {
     const transitionKey = transition ? `${transition.year}|${transition.direction}` : null;
     const transitionSet = transitionKey && state.transitionMemberIndex ? state.transitionMemberIndex[transitionKey] : null;
     const baseKeys = getBaseKeys();
+    const searchStartedAt = Date.now();
 
     updateSearchUrl();
 
     if (!state.searchWorker || !state.searchWorkerReady || state.searchWorkerErrored) {
         hideAutocomplete();
-        runSearchLegacy(baseKeys, transitionSet);
+        runSearchLegacy(baseKeys, transitionSet, searchStartedAt);
         updateRegexPill(false, '');
         return;
     }
@@ -1701,13 +1766,16 @@ function runSearch() {
             state.regexMode = !!payload.regexMode;
             updateRegexPill(!!payload.regexMode, payload.warning || '');
             renderAutocomplete(state.lastSearchSuggestions);
-            applySearchResults(names);
+            applySearchResults(names, {
+                usedWorker: true,
+                latencyMs: Date.now() - searchStartedAt
+            });
         })
         .catch(() => {
             if (token !== state.searchRunToken) return;
             state.searchWorkerErrored = true;
             hideAutocomplete();
-            runSearchLegacy(baseKeys, transitionSet);
+            runSearchLegacy(baseKeys, transitionSet, searchStartedAt);
             updateRegexPill(false, '');
         });
 }
@@ -1792,9 +1860,11 @@ function applyAutocompleteIndex(idx) {
     const item = state.autocompleteItems[idx];
     if (!item) return;
     captureAnalyticsEvent('search_autocomplete_selected', {
-        value: (item.value || '').slice(0, SEARCH_ANALYTICS_MAX_QUERY_LEN),
+        source: 'autocomplete',
+        selected_value: (item.value || '').slice(0, SEARCH_ANALYTICS_MAX_QUERY_LEN),
+        selected_rank: idx + 1,
         suggestion_type: item.type || 'suggestion',
-        query: (state.filters.text || '').trim().slice(0, SEARCH_ANALYTICS_MAX_QUERY_LEN)
+        typed_query: (state.filters.text || '').trim().slice(0, SEARCH_ANALYTICS_MAX_QUERY_LEN)
     });
     window.applySearch(item.value || '', 'autocomplete');
     hideAutocomplete();
@@ -2195,6 +2265,12 @@ function appendNextBatch() {
     document.getElementById('scroll-sentinel')?.remove();
     els.results.insertAdjacentHTML('beforeend', html + getSentinel());
     state.visibleCount = endIdx;
+    captureAnalyticsEvent('results_batch_loaded', {
+        source: 'infinite_scroll',
+        start_idx: startIdx,
+        end_idx: endIdx,
+        total_results: state.filteredKeys.length
+    });
     observeSentinel();
 }
 
@@ -2279,6 +2355,12 @@ function applyTransitionFilter(year, direction) {
     const isSame = current && current.year === year && current.direction === direction;
     if (isSame) {
         state.filters.transition = null;
+        captureAnalyticsEvent('transition_filter_applied', {
+            source: 'transition_filter',
+            year,
+            direction,
+            enabled: false
+        });
         setSearchSource('transition_filter');
         runSearch();
         return;
@@ -2288,11 +2370,23 @@ function applyTransitionFilter(year, direction) {
     computeTransitionMemberIndex()
         .then(() => {
             state.filters.transition = { year, direction };
+            captureAnalyticsEvent('transition_filter_applied', {
+                source: 'transition_filter',
+                year,
+                direction,
+                enabled: true
+            });
             setSearchSource('transition_filter');
             runSearch();
         })
         .catch(() => {
             state.filters.transition = null;
+            captureAnalyticsEvent('transition_filter_applied', {
+                source: 'transition_filter',
+                year,
+                direction,
+                enabled: false
+            });
             setSearchSource('transition_filter');
             runSearch();
         });
@@ -2305,10 +2399,12 @@ function toggleCard(id) {
     el.querySelector('.card-header')?.setAttribute('aria-expanded', expanded);
     if (expanded) {
         const name = el.getAttribute('data-name') || '';
+        const resultIndex = state.filteredKeys.indexOf(name);
         captureAnalyticsEvent('person_card_opened', {
+            source: 'result_card',
             person_name: name,
-            query: (state.filters.text || '').trim().slice(0, SEARCH_ANALYTICS_MAX_QUERY_LEN),
-            result_count: state.filteredKeys.length
+            result_index: resultIndex,
+            visible_count: state.visibleCount
         });
         loadAndRenderPersonDetails(el).then(() => ensurePersonChart(el));
     }
@@ -2425,6 +2521,7 @@ document.addEventListener('click', (e) => {
 els.clearBtn.addEventListener('click', () => {
     const previousQuery = (state.filters.text || '').trim();
     captureAnalyticsEvent('search_cleared', {
+        source: 'clear_search',
         query: previousQuery.slice(0, SEARCH_ANALYTICS_MAX_QUERY_LEN),
         query_length: previousQuery.length
     });
@@ -2441,47 +2538,56 @@ els.clearBtn.addEventListener('click', () => {
 });
 els.typeSelect.addEventListener('change', (e) => {
     state.filters.type = e.target.value;
+    trackFilterChanged('type', e.target.value);
     setSearchSource('filter_change');
     runSearch();
 });
 els.roleInput.addEventListener('input', debounce((e) => {
     state.filters.role = e.target.value;
+    trackFilterChanged('role', (e.target.value || '').trim().slice(0, SEARCH_ANALYTICS_MAX_QUERY_LEN));
     setSearchSource('filter_change');
     runSearch();
 }, 300));
 els.salaryMin.addEventListener('input', debounce((e) => {
     state.filters.minSalary = parseFloat(e.target.value) || null;
+    trackFilterChanged('salary_min', state.filters.minSalary);
     setSearchSource('filter_change');
     runSearch();
 }, 300));
 els.salaryMax.addEventListener('input', debounce((e) => {
     state.filters.maxSalary = parseFloat(e.target.value) || null;
+    trackFilterChanged('salary_max', state.filters.maxSalary);
     setSearchSource('filter_change');
     runSearch();
 }, 300));
 els.inactiveToggle.addEventListener('change', (e) => {
     state.filters.showInactive = e.target.checked;
+    trackFilterChanged('show_inactive', e.target.checked);
     setSearchSource('filter_change');
     runSearch();
 });
 els.sortSelect.addEventListener('change', (e) => {
     state.filters.sort = e.target.value;
+    trackFilterChanged('sort_order', e.target.value);
     setSearchSource('filter_change');
     runSearch();
 });
 els.fteToggle.addEventListener('change', (e) => {
     state.filters.fullTimeOnly = e.target.checked;
+    trackFilterChanged('full_time_only', e.target.checked);
     setSearchSource('filter_change');
     runSearch();
 });
 els.dataFlagsToggle.addEventListener('change', (e) => {
     state.filters.dataFlagsOnly = e.target.checked;
+    trackFilterChanged('data_flags_only', e.target.checked);
     setSearchSource('filter_change');
     runSearch();
 });
 if (els.exclusionsMode) {
     els.exclusionsMode.addEventListener('change', (e) => {
         state.filters.exclusionsMode = e.target.value;
+        trackFilterChanged('exclusions_mode', e.target.value);
         setSearchSource('filter_change');
         runSearch();
     });
@@ -2529,7 +2635,10 @@ function setupHistoricalChartsToggle() {
         wrapper.classList.toggle('hidden', !nextExpanded ? true : false);
         wrapper.setAttribute('aria-hidden', String(!nextExpanded));
         toggle.textContent = nextExpanded ? 'Hide historical charts' : 'Show historical charts';
-        captureAnalyticsEvent('historical_charts_toggled', { expanded: nextExpanded });
+        captureAnalyticsEvent('historical_charts_toggled', {
+            source: 'historical_toggle',
+            expanded: nextExpanded
+        });
 
         if (nextExpanded && !state.historicalChartsRendered) {
             renderInteractiveCharts(state.historyStats);
@@ -2573,6 +2682,7 @@ function setupHotkeys() {
         if (e.key === '?' ) {
             if (modal) {
                 modal.classList.remove('hidden');
+                captureAnalyticsEvent('info_modal_opened', { source: 'hotkey' });
                 const hotkeys = document.getElementById('hotkeys-section');
                 if (hotkeys) hotkeys.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
@@ -2604,7 +2714,10 @@ function setupHotkeys() {
 document.addEventListener('DOMContentLoaded', () => {
     const modal = document.getElementById('info-modal');
     if (modal) {
-        document.getElementById('info-btn').addEventListener('click', () => modal.classList.remove('hidden'));
+        document.getElementById('info-btn').addEventListener('click', () => {
+            modal.classList.remove('hidden');
+            captureAnalyticsEvent('info_modal_opened', { source: 'info_button' });
+        });
         document.getElementById('close-modal').addEventListener('click', () => modal.classList.add('hidden'));
         window.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape') modal.classList.add('hidden'); });
@@ -2668,16 +2781,16 @@ function copyLink(e, name) {
     const url = new URL(window.location.href); url.searchParams.set('name', name);
     window.history.pushState({ path: url.href }, '', url.href);
     captureAnalyticsEvent('person_link_copied', {
-        person_name: name,
-        query: (state.filters.text || '').trim().slice(0, SEARCH_ANALYTICS_MAX_QUERY_LEN)
+        source: 'person_link',
+        person_name: name
     });
     navigator.clipboard.writeText(url.href).then(() => showToast(`Link copied for ${name}`)).catch(console.error);
 }
 
 function openCorrectionIssue(name) {
     captureAnalyticsEvent('correction_issue_opened', {
-        person_name: name || 'Unknown',
-        query: (state.filters.text || '').trim().slice(0, SEARCH_ANALYTICS_MAX_QUERY_LEN)
+        source: 'correction_button',
+        person_name: name || 'Unknown'
     });
     const base = 'https://github.com/jaxsnjohnson/osu-sal-report-data-and-site/issues/new';
     const safeName = name || 'Unknown';

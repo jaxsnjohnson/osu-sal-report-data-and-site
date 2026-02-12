@@ -28,7 +28,11 @@
         posthog.init('phc_u1MTs7VptWYIYjTOiaB5JaGayfGLmAEG9Amjm7yfd1p', {
             api_host: 'https://us.i.posthog.com',
             defaults: '2026-01-30',
-            respect_dnt: true
+            respect_dnt: true,
+            autocapture: true,
+            capture_pageview: true,
+            capture_pageleave: true,
+            disable_session_recording: false
         });
     </script>
 
