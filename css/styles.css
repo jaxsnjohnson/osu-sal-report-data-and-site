@@ -144,6 +144,131 @@ h1 { font-size: 1.5rem; margin-bottom: 10px; color: var(--text-main); }
 }
 .search-bar:focus { border-color: var(--primary); }
 
+.regex-pill {
+    position: absolute;
+    right: 44px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: #3a2f16;
+    border: 1px solid #8a6a1e;
+    color: #facc15;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    pointer-events: none;
+}
+
+.regex-pill.hidden {
+    display: none;
+}
+
+.search-autocomplete {
+    width: 100%;
+    background: #242424;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: -4px;
+    margin-bottom: 2px;
+}
+
+.search-autocomplete.hidden {
+    display: none;
+}
+
+.autocomplete-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    background: #2a2a2a;
+    border: 1px solid var(--border);
+    color: var(--text-main);
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    text-align: left;
+}
+
+.autocomplete-item:hover,
+.autocomplete-item.active {
+    border-color: var(--primary);
+    background: #353535;
+}
+
+.autocomplete-type {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.dsl-help {
+    width: 100%;
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    padding: 8px 10px;
+    color: var(--text-muted);
+    background: #212121;
+    margin-bottom: 8px;
+}
+
+.dsl-help summary {
+    cursor: pointer;
+    font-size: 0.82rem;
+}
+
+.dsl-help-body {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.dsl-chip {
+    background: #2d2d2d;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px 8px;
+    color: var(--text-main);
+    font-size: 0.75rem;
+}
+
+.search-hit {
+    background: rgba(215, 63, 9, 0.25);
+    color: #ffd8ca;
+    border-radius: 3px;
+    padding: 0 2px;
+}
+
+.no-results-panel {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 20px 12px;
+    background: #222;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+}
+
+.no-results-title {
+    color: var(--text-main);
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.no-results-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-top: 10px;
+}
+
 .clear-btn {
     position: absolute;
     right: 12px;
