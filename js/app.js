@@ -39,6 +39,7 @@ const DATA_BUCKET_DIR = 'data/people';
 const SEARCH_ANALYTICS_MAX_QUERY_LEN = 120;
 const SEARCH_EVENT_MIN_INTERVAL_MS = 1200;
 const ANALYTICS_EVENT_VERSION = 2;
+const TRANSITION_BUCKET_LOAD_CONCURRENCY = 6;
 
 const getInflationMap = () => window.INFLATION_INDEX_BY_MONTH || {};
 const getInflationBaseMonth = () => window.INFLATION_BASE_MONTH || '';
@@ -137,6 +138,21 @@ const loadBucket = (bucket) => {
             delete state.bucketPromises[bucket];
         });
     return state.bucketPromises[bucket];
+};
+
+const forEachWithConcurrency = (items, concurrency, iteratee) => {
+    if (!Array.isArray(items) || items.length === 0) return Promise.resolve();
+    const safeConcurrency = Math.max(1, Math.floor(concurrency) || 1);
+    const workerCount = Math.min(safeConcurrency, items.length);
+    let nextIndex = 0;
+
+    const runWorker = () => {
+        const currentIndex = nextIndex++;
+        if (currentIndex >= items.length) return Promise.resolve();
+        return Promise.resolve(iteratee(items[currentIndex], currentIndex)).then(runWorker);
+    };
+
+    return Promise.all(Array.from({ length: workerCount }, runWorker)).then(() => undefined);
 };
 
 const hydratePersonDetail = (person) => {
@@ -2312,38 +2328,42 @@ function computeTransitionMemberIndex() {
     if (state.transitionIndexPromise) return state.transitionIndexPromise;
 
     const buckets = [...new Set(state.masterKeys.map(bucketForName))];
-    state.transitionIndexPromise = Promise.all(buckets.map(loadBucket))
-        .then(bucketDataList => {
-            const index = {};
+    const index = {};
 
-            const add = (year, direction, name) => {
-                if (!year || !direction || !name) return;
-                const key = `${year}|${direction}`;
-                if (!index[key]) index[key] = new Set();
-                index[key].add(name);
-            };
+    const add = (year, direction, name) => {
+        if (!year || !direction || !name) return;
+        const key = `${year}|${direction}`;
+        if (!index[key]) index[key] = new Set();
+        index[key].add(name);
+    };
 
-            bucketDataList.forEach(bucketData => {
-                Object.entries(bucketData).forEach(([name, person]) => {
-                    if (!person || !person.Timeline || person.Timeline.length < 2) return;
-                    hydratePersonDetail(person);
+    const processBucketData = (bucketData) => {
+        Object.entries(bucketData).forEach(([name, person]) => {
+            if (!person || !person.Timeline || person.Timeline.length < 2) return;
+            hydratePersonDetail(person);
 
-                    let prevState = null;
-                    person.Timeline.forEach(snap => {
-                        const currentState = getClassStateFromSource(snap.Source);
-                        if (!currentState) return;
-                        if (prevState && prevState !== currentState) {
-                            const year = new Date(snap.Date).getFullYear();
-                            if (!isNaN(year)) {
-                                const direction = currentState === 'unclassified' ? 'toUnclassified' : 'toClassified';
-                                add(year, direction, name);
-                            }
-                        }
-                        prevState = currentState;
-                    });
-                });
+            let prevState = null;
+            person.Timeline.forEach(snap => {
+                const currentState = getClassStateFromSource(snap.Source);
+                if (!currentState) return;
+                if (prevState && prevState !== currentState) {
+                    const year = new Date(snap.Date).getFullYear();
+                    if (!isNaN(year)) {
+                        const direction = currentState === 'unclassified' ? 'toUnclassified' : 'toClassified';
+                        add(year, direction, name);
+                    }
+                }
+                prevState = currentState;
             });
+        });
+    };
 
+    state.transitionIndexPromise = forEachWithConcurrency(
+        buckets,
+        TRANSITION_BUCKET_LOAD_CONCURRENCY,
+        (bucket) => loadBucket(bucket).then(processBucketData)
+    )
+        .then(() => {
             state.transitionMemberIndex = index;
             return index;
         })
