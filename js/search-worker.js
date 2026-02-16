@@ -30,6 +30,16 @@ const tokenize = (value) => {
     if (tokenStart !== -1) tokens.push(text.slice(tokenStart));
     return tokens;
 };
+const tokenizeLongUnique = (value) => {
+    const out = [];
+    const seen = new Set();
+    for (const token of tokenize(value)) {
+        if (token.length < 3 || seen.has(token)) continue;
+        seen.add(token);
+        out.push(token);
+    }
+    return out;
+};
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const boundedEditDistance = (a, b, maxDist) => {
@@ -223,14 +233,14 @@ const getSortKey = (sortFromFilters, sortFromDsl) => {
     return sortFromFilters || 'name-asc';
 };
 
-const scoreTokenInText = (term, text) => {
+const scoreTokenInText = (term, text, preTokens) => {
     if (!term || !text) return null;
     if (text === term) return 0;
     if (text.startsWith(term)) return 0;
     if (text.includes(term)) return 1;
     const maxDist = term.length <= 4 ? 1 : (term.length <= 6 ? 2 : 3);
     let best = maxDist + 1;
-    const tokens = tokenize(text);
+    const tokens = preTokens || tokenize(text);
     for (const token of tokens) {
         if (token.length < 3) continue;
         const dist = boundedEditDistance(term, token, maxDist);
@@ -241,12 +251,23 @@ const scoreTokenInText = (term, text) => {
     return null;
 };
 
-const matchesFieldTerm = (term, values) => {
+const matchesFieldTerm = (term, values, preTokens) => {
     if (!term) return false;
     for (const value of values) {
         if (!value) continue;
         if (value.includes(term)) return true;
-        const maxDist = term.length <= 5 ? 1 : 2;
+    }
+
+    const maxDist = term.length <= 5 ? 1 : 2;
+    if (preTokens) {
+        for (const token of preTokens) {
+            if (token.length < 3) continue;
+            if (boundedEditDistance(term, token, maxDist) <= maxDist) return true;
+        }
+        return false;
+    }
+
+    for (const value of values) {
         for (const token of tokenize(value)) {
             if (token.length < 3) continue;
             if (boundedEditDistance(term, token, maxDist) <= maxDist) return true;
@@ -297,33 +318,38 @@ const scoreRecord = (rec, parsed) => {
     }
 
     for (const term of parsed.nameTerms) {
-        const fieldScore = scoreTokenInText(term, rec.nameNorm);
+        const fieldScore = scoreTokenInText(term, rec.nameNorm, rec.nameTokens);
         if (fieldScore === null) return null;
         score += fieldScore;
     }
 
     for (const term of parsed.orgTerms) {
-        const matches = matchesFieldTerm(term, [rec.homeOrgNorm, rec.lastOrgNorm, ...(rec.orgAliases || [])]);
+        const orgValues = rec.orgMatchValues || [rec.homeOrgNorm, rec.lastOrgNorm, ...(rec.orgAliases || [])];
+        const matches = matchesFieldTerm(term, orgValues, rec.orgSearchTokens);
         if (!matches) return null;
         score += 1;
     }
 
     for (const term of parsed.roleTerms) {
-        const matches = matchesFieldTerm(term, [rec.roleSearch, ...(rec.rolesNorm || []), ...(rec.roleAliases || [])]);
+        const roleValues = rec.roleMatchValues || [rec.roleSearch, ...(rec.rolesNorm || []), ...(rec.roleAliases || [])];
+        const matches = matchesFieldTerm(term, roleValues, rec.roleSearchTokens);
         if (!matches) return null;
         score += 1;
     }
 
     for (const term of parsed.terms) {
-        const nameScore = scoreTokenInText(term, rec.nameNorm);
-        const roleScore = scoreTokenInText(term, rec.roleSearch);
-        const orgScore = scoreTokenInText(term, rec.orgSearch);
-        const searchScore = scoreTokenInText(term, rec.searchText);
-        const best = [nameScore, roleScore === null ? null : roleScore + 1, orgScore === null ? null : orgScore + 1, searchScore === null ? null : searchScore + 2]
-            .filter(v => v !== null)
-            .sort((a, b) => a - b)[0];
+        const nameScore = scoreTokenInText(term, rec.nameNorm, rec.nameTokens);
+        const roleScore = scoreTokenInText(term, rec.roleSearch, rec.roleSearchTokens);
+        const orgScore = scoreTokenInText(term, rec.orgSearch, rec.orgSearchTokens);
+        const searchScore = scoreTokenInText(term, rec.searchText, rec.searchTextTokens);
 
-        if (best === undefined) return null;
+        let best = Infinity;
+        if (nameScore !== null && nameScore < best) best = nameScore;
+        if (roleScore !== null && (roleScore + 1) < best) best = roleScore + 1;
+        if (orgScore !== null && (orgScore + 1) < best) best = orgScore + 1;
+        if (searchScore !== null && (searchScore + 2) < best) best = searchScore + 2;
+
+        if (!Number.isFinite(best)) return null;
         score += best;
     }
 
@@ -542,9 +568,17 @@ const prepareRecords = (rawRecords) => rawRecords.map(rec => {
         : roles.flatMap(role => tokenize(role));
     const roleAliases = Array.from(new Set(roleAliasesRaw.map(normalizeText).filter(Boolean)));
     const exclusionTs = rec.exclusionDate ? new Date(rec.exclusionDate).getTime() : 0;
+    const nameNorm = normalizeText(rec.nameNorm || rec.name || '');
+    const roleSearch = normalizeText((roles || []).join(' ') + ' ' + roleAliases.join(' '));
+    const orgSearch = normalizeText(`${homeOrgNorm} ${lastOrgNorm} ${orgAliases.join(' ')}`);
+    const searchText = normalizeText(rec.searchText || `${rec.name || ''} ${rec.homeOrg || ''} ${rec.lastOrg || ''} ${(roles || []).join(' ')}`);
+    const orgMatchValues = [homeOrgNorm, lastOrgNorm, ...orgAliases].filter(Boolean);
+    const roleMatchValues = [roleSearch, ...rolesNorm, ...roleAliases].filter(Boolean);
+
     return {
         name: rec.name,
-        nameNorm: normalizeText(rec.nameNorm || rec.name || ''),
+        nameNorm,
+        nameTokens: tokenizeLongUnique(nameNorm),
         homeOrg: rec.homeOrg || '',
         homeOrgNorm,
         lastOrg: rec.lastOrg || '',
@@ -553,8 +587,12 @@ const prepareRecords = (rawRecords) => rawRecords.map(rec => {
         rolesNorm,
         orgAliases,
         roleAliases,
-        roleSearch: normalizeText((roles || []).join(' ') + ' ' + roleAliases.join(' ')),
-        orgSearch: normalizeText(`${homeOrgNorm} ${lastOrgNorm} ${orgAliases.join(' ')}`),
+        roleSearch,
+        roleSearchTokens: tokenizeLongUnique(roleSearch),
+        orgSearch,
+        orgSearchTokens: tokenizeLongUnique(orgSearch),
+        orgMatchValues,
+        roleMatchValues,
         isUnclass: !!rec.isUnclass,
         isActive: !!rec.isActive,
         isFullTime: !!rec.isFullTime,
@@ -564,7 +602,8 @@ const prepareRecords = (rawRecords) => rawRecords.map(rec => {
         hasFlags: !!rec.hasFlags,
         wasExcluded: !!rec.wasExcluded,
         exclusionTs: Number.isFinite(exclusionTs) ? exclusionTs : 0,
-        searchText: normalizeText(rec.searchText || `${rec.name || ''} ${rec.homeOrg || ''} ${rec.lastOrg || ''} ${(roles || []).join(' ')}`)
+        searchText,
+        searchTextTokens: tokenizeLongUnique(searchText)
     };
 });
 
