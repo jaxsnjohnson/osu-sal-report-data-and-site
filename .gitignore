@@ -574,3 +574,4 @@ temp_txt/
 .venv/lib/python3.9/site-packages/setuptools/wheel.py
 .venv/lib/python3.9/site-packages/setuptools/windows_support.py
 .venv/pyvenv.cfg
+data.json
