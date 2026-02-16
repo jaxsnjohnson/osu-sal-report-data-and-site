@@ -10,7 +10,26 @@ let editDistancePrev = new Uint32Array(0);
 let editDistanceCur = new Uint32Array(0);
 
 const normalizeText = (value) => (value || '').toString().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-const tokenize = (value) => normalizeText(value).split(' ').filter(Boolean);
+const tokenize = (value) => {
+    const text = (value || '').toString().toLowerCase();
+    const tokens = [];
+    let tokenStart = -1;
+
+    for (let i = 0; i < text.length; i++) {
+        const code = text.charCodeAt(i);
+        const isAlphaNum = (code >= 48 && code <= 57) || (code >= 97 && code <= 122);
+
+        if (isAlphaNum) {
+            if (tokenStart === -1) tokenStart = i;
+        } else if (tokenStart !== -1) {
+            tokens.push(text.slice(tokenStart, i));
+            tokenStart = -1;
+        }
+    }
+
+    if (tokenStart !== -1) tokens.push(text.slice(tokenStart));
+    return tokens;
+};
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const boundedEditDistance = (a, b, maxDist) => {
