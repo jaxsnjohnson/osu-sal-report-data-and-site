@@ -473,11 +473,15 @@ const parseAndSearch = (payload) => {
     }
 
     const transitionSet = payload.transitionNames ? new Set(payload.transitionNames) : null;
+    const baseSet = payload.baseNames ? new Set(payload.baseNames) : null;
+    const roleFilterNorm = payload.roleFilter ? normalizeText(payload.roleFilter) : '';
     const payloadWithSets = {
         ...payload,
-        baseSet: payload.baseNames ? new Set(payload.baseNames) : null
+        baseSet,
+        roleFilterNorm
     };
     const cutoffTs = (payload.nowTs || Date.now()) - (365 * 24 * 60 * 60 * 1000);
+    const queryNorm = normalizeText(parsed.raw);
     const sortKey = getSortKey(payload.sort, parsed.sort);
 
     const cacheKey = buildCacheKey(payload, parsed);
@@ -498,6 +502,7 @@ const parseAndSearch = (payload) => {
     const items = [];
     let regexTooBroad = false;
     let warning = '';
+    let suggestions = [];
 
     if (parsed.regex) {
         const regex = parsed.regexCompiled;
@@ -519,8 +524,47 @@ const parseAndSearch = (payload) => {
             }
         }
     } else {
+        const seen = new Set();
+        const suggestionStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+        const suggestionBudgetMs = 20;
+        const hasQueryNorm = !!queryNorm;
+
+        const pushSuggestion = (key, entry) => {
+            if (seen.has(key)) return false;
+            seen.add(key);
+            suggestions.push(entry);
+            return suggestions.length >= SUGGESTION_LIMIT;
+        };
+
         for (const rec of records) {
             if (!appliesCommonFilters(rec, payloadWithSets, parsed, transitionSet, cutoffTs)) continue;
+
+            if (hasQueryNorm && suggestions.length < SUGGESTION_LIMIT) {
+                const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+                if ((now - suggestionStart) <= suggestionBudgetMs) {
+                    if (rec.nameNorm && (rec.nameNorm.startsWith(queryNorm) || rec.nameNorm.includes(queryNorm))) {
+                        pushSuggestion(`name:${rec.nameNorm}`, { type: 'name', value: rec.name });
+                    }
+
+                    if (suggestions.length < SUGGESTION_LIMIT) {
+                        for (const role of rec.roles) {
+                            const roleNorm = normalizeText(role);
+                            if (!roleNorm || (!roleNorm.startsWith(queryNorm) && !roleNorm.includes(queryNorm))) continue;
+                            if (pushSuggestion(`role:${roleNorm}`, { type: 'role', value: role })) break;
+                        }
+                    }
+
+                    if (suggestions.length < SUGGESTION_LIMIT) {
+                        const orgCandidates = [rec.homeOrg, rec.lastOrg];
+                        for (const org of orgCandidates) {
+                            const orgNorm = normalizeText(org);
+                            if (!orgNorm || (!orgNorm.startsWith(queryNorm) && !orgNorm.includes(queryNorm))) continue;
+                            if (pushSuggestion(`org:${orgNorm}`, { type: 'org', value: org })) break;
+                        }
+                    }
+                }
+            }
+
             const score = scoreRecord(rec, parsed);
             if (score === null) continue;
             items.push({
@@ -533,8 +577,6 @@ const parseAndSearch = (payload) => {
         }
     }
 
-    const queryNorm = normalizeText(parsed.raw);
-    const suggestions = buildSuggestions(queryNorm, parsed, payloadWithSets, transitionSet, cutoffTs);
     const sorted = sortResults(items, sortKey);
 
     resultCache.set(cacheKey, { items, suggestions, regexTooBroad, warning });
