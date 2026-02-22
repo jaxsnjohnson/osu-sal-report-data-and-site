@@ -6,6 +6,7 @@ const resultCache = new Map();
 const CACHE_LIMIT = 80;
 const REGEX_MAX_MATCHES = 3000;
 const SUGGESTION_LIMIT = 8;
+const DAY_MS = 24 * 60 * 60 * 1000;
 let editDistancePrev = new Uint32Array(0);
 let editDistanceCur = new Uint32Array(0);
 
@@ -77,7 +78,7 @@ const boundedEditDistance = (a, b, maxDist) => {
 
 const parseAmount = (value) => {
     if (!value) return null;
-    const str = value.toString().trim().toLowerCase().replace(/\$/g, '');
+    const str = value.toString().trim().toLowerCase().replace(/[$,]/g, '');
     const mult = str.endsWith('m') ? 1000000 : (str.endsWith('k') ? 1000 : 1);
     const num = parseFloat(mult === 1 ? str : str.slice(0, -1));
     if (Number.isNaN(num)) return null;
@@ -103,14 +104,37 @@ const buildOrgAliases = (orgValue) => {
 };
 
 const tokenizeQuery = (query) => {
+    const text = (query || '').toString();
     const tokens = [];
-    const re = /"([^"]+)"|(\S+)/g;
-    let match;
-    while ((match = re.exec(query)) !== null) {
-        if (match[1]) tokens.push(match[1]);
-        else if (match[2]) tokens.push(match[2]);
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        if (char === '"') {
+            inQuotes = !inQuotes;
+            current += char;
+            continue;
+        }
+        if (!inQuotes && /\s/.test(char)) {
+            if (current) tokens.push(current);
+            current = '';
+            continue;
+        }
+        current += char;
     }
+
+    if (current) tokens.push(current);
     return tokens;
+};
+
+const splitFieldTerms = (value) => {
+    const raw = (value || '').toString().trim();
+    if (!raw) return [];
+    const unwrapped = raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"')
+        ? raw.slice(1, -1)
+        : raw;
+    return tokenize(unwrapped).filter(Boolean);
 };
 
 const parseQuery = (query) => {
@@ -162,15 +186,15 @@ const parseQuery = (query) => {
             if (!value) continue;
 
             if (field === 'name') {
-                parsed.nameTerms.push(normalizeText(value));
+                parsed.nameTerms.push(...splitFieldTerms(value));
                 continue;
             }
             if (field === 'org') {
-                parsed.orgTerms.push(normalizeText(value));
+                parsed.orgTerms.push(...splitFieldTerms(value));
                 continue;
             }
             if (field === 'role') {
-                parsed.roleTerms.push(normalizeText(value));
+                parsed.roleTerms.push(...splitFieldTerms(value));
                 continue;
             }
             if (field === 'type') {
@@ -278,7 +302,8 @@ const matchesFieldTerm = (term, values, preTokens) => {
 
 const appliesCommonFilters = (rec, payload, parsed, transitionSet, cutoffTs) => {
     if (payload.baseSet && !payload.baseSet.has(rec.name)) return false;
-    if (payload.roleFilter && !rec.roleSearch.includes(payload.roleFilter)) return false;
+    const roleFilter = payload.roleFilterNorm || payload.roleFilter;
+    if (roleFilter && !rec.roleSearch.includes(roleFilter)) return false;
 
     if (payload.minSalary !== null && rec.totalPay < payload.minSalary) return false;
     if (payload.maxSalary !== null && rec.totalPay > payload.maxSalary) return false;
@@ -439,6 +464,9 @@ const buildSuggestions = (queryNorm, parsed, payload, transitionSet, cutoffTs) =
 };
 
 const buildCacheKey = (payload, parsed) => {
+    const recentCutoffKey = payload.exclusionsMode === 'recent'
+        ? Math.floor((payload.nowTs || Date.now()) / DAY_MS)
+        : '';
     const parts = [
         parsed.raw,
         payload.roleFilter || '',
@@ -452,7 +480,8 @@ const buildCacheKey = (payload, parsed) => {
         parsed.status || '',
         parsed.payMin === null ? '' : parsed.payMin,
         parsed.payMax === null ? '' : parsed.payMax,
-        parsed.sort || ''
+        parsed.sort || '',
+        recentCutoffKey
     ];
     return parts.join('|');
 };
@@ -480,7 +509,9 @@ const parseAndSearch = (payload) => {
         baseSet,
         roleFilterNorm
     };
-    const cutoffTs = (payload.nowTs || Date.now()) - (365 * 24 * 60 * 60 * 1000);
+    const nowTs = payload.nowTs || Date.now();
+    const utcDayKey = Math.floor(nowTs / DAY_MS);
+    const cutoffTs = (utcDayKey - 365) * DAY_MS;
     const queryNorm = normalizeText(parsed.raw);
     const sortKey = getSortKey(payload.sort, parsed.sort);
 
@@ -686,5 +717,10 @@ self.onmessage = (event) => {
         } catch (err) {
             postMessage({ type: 'error', id, message: err && err.message ? err.message : 'Search failed' });
         }
+        return;
+    }
+
+    if (type === 'ping') {
+        postMessage({ type: 'pong', id, ready: !!isReady });
     }
 };
