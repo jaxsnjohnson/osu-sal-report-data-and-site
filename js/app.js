@@ -38,8 +38,10 @@ const DATA_SEARCH_URL = 'data/search-index.json';
 const DATA_BUCKET_DIR = 'data/people';
 const SEARCH_ANALYTICS_MAX_QUERY_LEN = 120;
 const SEARCH_EVENT_MIN_INTERVAL_MS = 1200;
+const WORKER_HEALTH_CHECK_MIN_INTERVAL_MS = 1200;
 const ANALYTICS_EVENT_VERSION = 2;
 const TRANSITION_BUCKET_LOAD_CONCURRENCY = 6;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const getInflationMap = () => window.INFLATION_INDEX_BY_MONTH || {};
 const getInflationBaseMonth = () => window.INFLATION_BASE_MONTH || '';
@@ -81,6 +83,7 @@ const escapeHtml = (value) => {
 };
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const normalizeText = (value) => (value || '').toString().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
 const highlightText = (text, terms) => {
     const raw = (text || '').toString();
@@ -441,56 +444,130 @@ const buildWorkerBaseKey = (names) => {
     return `${names.length}:${names[0]}:${names[names.length - 1]}`;
 };
 
-const initSearchWorker = () => {
-    if (typeof Worker === 'undefined') return;
-    try {
-        const worker = new Worker('js/search-worker.js');
-        state.searchWorker = worker;
-        state.searchWorkerReady = false;
-        state.searchWorkerErrored = false;
+const rejectAllPendingSearches = (reason) => {
+    const err = reason instanceof Error ? reason : new Error(reason || 'Search worker reset');
+    state.searchPending.forEach((pending) => {
+        pending.reject(err);
+    });
+    state.searchPending.clear();
+    state.searchPingPending.forEach((pending) => {
+        pending.reject(err);
+    });
+    state.searchPingPending.clear();
+};
 
-        worker.onmessage = (event) => {
-            const msg = event.data || {};
-            const id = msg.id;
-            if (msg.type === 'ready') {
-                state.searchWorkerReady = true;
-                runSearch();
-                return;
-            }
-            if (msg.type === 'error') {
-                state.searchWorkerErrored = true;
-                state.searchWorkerReady = false;
-                if (id && state.searchPending.has(id)) {
-                    const pending = state.searchPending.get(id);
-                    state.searchPending.delete(id);
-                    pending.reject(new Error(msg.message || 'Search worker error'));
-                }
-                return;
-            }
-            if (msg.type === 'result' && id && state.searchPending.has(id)) {
-                const pending = state.searchPending.get(id);
-                state.searchPending.delete(id);
-                pending.resolve(msg.payload || {});
-            }
-        };
+const teardownSearchWorker = (reason = 'teardown') => {
+    if (state.searchWorker) {
+        try {
+            state.searchWorker.terminate();
+        } catch (err) { /* no-op */ }
+    }
+    state.searchWorker = null;
+    state.searchWorkerReady = false;
+    state.searchWorkerErrored = false;
+    state.searchWorkerInitInFlight = false;
+    rejectAllPendingSearches(`Search worker ${reason}`);
+};
 
-        worker.onerror = () => {
+const createSearchWorker = () => {
+    const worker = new Worker('js/search-worker.js');
+    state.searchWorker = worker;
+    state.searchWorkerReady = false;
+    state.searchWorkerErrored = false;
+    state.searchWorkerInitInFlight = false;
+
+    worker.onmessage = (event) => {
+        const msg = event.data || {};
+        const id = msg.id;
+        if (msg.type === 'ready') {
+            state.searchWorkerReady = true;
+            state.searchWorkerInitInFlight = false;
+            state.searchRecoveryAttempts = 0;
+            if (state.searchWorkerRecovering) {
+                state.searchWorkerRecovering = false;
+            }
+            runSearch();
+            return;
+        }
+        if (msg.type === 'pong' && id && state.searchPingPending.has(id)) {
+            const pending = state.searchPingPending.get(id);
+            state.searchPingPending.delete(id);
+            pending.resolve(!!msg.ready);
+            return;
+        }
+        if (msg.type === 'error') {
             state.searchWorkerErrored = true;
             state.searchWorkerReady = false;
-        };
+            state.searchWorkerInitInFlight = false;
+            state.searchWorkerRecovering = false;
+            if (id && state.searchPending.has(id)) {
+                const pending = state.searchPending.get(id);
+                state.searchPending.delete(id);
+                pending.reject(new Error(msg.message || 'Search worker error'));
+            }
+            if (id && state.searchPingPending.has(id)) {
+                const pending = state.searchPingPending.get(id);
+                state.searchPingPending.delete(id);
+                pending.reject(new Error(msg.message || 'Search worker error'));
+            }
+            return;
+        }
+        if (msg.type === 'result' && id && state.searchPending.has(id)) {
+            const pending = state.searchPending.get(id);
+            state.searchPending.delete(id);
+            pending.resolve(msg.payload || {});
+        }
+    };
 
-        const initId = `init:${Date.now()}`;
+    worker.onerror = () => {
+        state.searchWorkerErrored = true;
+        state.searchWorkerReady = false;
+        state.searchWorkerInitInFlight = false;
+        state.searchWorkerRecovering = false;
+    };
+
+    return worker;
+};
+
+const initSearchWorker = (force = false) => {
+    if (typeof Worker === 'undefined') return false;
+    if (state.searchWorkerInitInFlight) return true;
+    if (!force && state.searchWorker && !state.searchWorkerErrored) return true;
+    if (force) teardownSearchWorker('reinit');
+    try {
+        const worker = createSearchWorker();
+        state.searchWorkerInitInFlight = true;
+        const initId = `init:${Date.now()}:${++state.searchRequestSeq}`;
         worker.postMessage({ type: 'init', id: initId, payload: { url: DATA_SEARCH_URL } });
+        return true;
     } catch (err) {
         state.searchWorkerErrored = true;
         state.searchWorkerReady = false;
+        state.searchWorkerInitInFlight = false;
+        state.searchWorkerRecovering = false;
+        return false;
     }
+};
+
+const recoverSearchWorker = (reason = 'recovery') => {
+    if (typeof Worker === 'undefined') return Promise.resolve(false);
+    if (state.searchWorkerRecovering) return Promise.resolve(true);
+    state.searchWorkerRecovering = true;
+    state.searchRecoveryAttempts += 1;
+    teardownSearchWorker(reason);
+    const started = initSearchWorker(true);
+    if (!started) {
+        state.searchWorkerRecovering = false;
+        return Promise.resolve(false);
+    }
+    return Promise.resolve(true);
 };
 
 const sendSearchToWorker = (payload) => {
     if (!state.searchWorker || !state.searchWorkerReady) {
         return Promise.reject(new Error('Search worker unavailable'));
     }
+    state.lastSearchPayload = payload;
     const id = `search:${++state.searchRequestSeq}`;
     return new Promise((resolve, reject) => {
         state.searchPending.set(id, { resolve, reject });
@@ -498,8 +575,26 @@ const sendSearchToWorker = (payload) => {
         setTimeout(() => {
             if (!state.searchPending.has(id)) return;
             state.searchPending.delete(id);
-            reject(new Error('Search worker timeout'));
+            const err = new Error('Search worker timeout');
+            err.code = 'WORKER_TIMEOUT';
+            reject(err);
         }, 5000);
+    });
+};
+
+const pingSearchWorker = (timeoutMs = 1200) => {
+    if (!state.searchWorker || state.searchWorkerErrored) {
+        return Promise.resolve(false);
+    }
+    const id = `ping:${++state.searchRequestSeq}`;
+    return new Promise((resolve, reject) => {
+        state.searchPingPending.set(id, { resolve, reject });
+        state.searchWorker.postMessage({ type: 'ping', id, payload: {} });
+        setTimeout(() => {
+            if (!state.searchPingPending.has(id)) return;
+            state.searchPingPending.delete(id);
+            resolve(false);
+        }, timeoutMs);
     });
 };
 
@@ -623,6 +718,15 @@ const getChartOptions = ({ yTickCallback, legend = true, animation = true, xTick
     };
 };
 
+function hexToRgba(hex, alpha = 1) {
+    const stripped = hex.replace('#', '');
+    if (stripped.length !== 6) return hex;
+    const r = parseInt(stripped.slice(0, 2), 16);
+    const g = parseInt(stripped.slice(2, 4), 16);
+    const b = parseInt(stripped.slice(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 const getPersonTrendHTML = (timeline, chartId) => {
     if (!timeline || timeline.length === 0) return '';
     const yearsDiff = getTimelineYears(timeline);
@@ -699,15 +803,31 @@ const state = {
     searchWorker: null,
     searchWorkerReady: false,
     searchWorkerErrored: false,
+    searchWorkerInitInFlight: false,
+    searchWorkerRecovering: false,
+    searchRecoveryAttempts: 0,
     searchRequestSeq: 0,
     searchRunToken: 0,
     searchPending: new Map(),
+    searchPingPending: new Map(),
+    lastSearchPayload: null,
+    lastWorkerHealthCheckTs: 0,
     lastSearchSuggestions: [],
     lastHighlightTerms: [],
     regexMode: false,
     searchWarning: '',
     autocompleteItems: [],
     autocompleteFocus: -1,
+    historicalCharts: {},
+    historicalAdvancedRendered: false,
+    historicalFullscreenEventsBound: false,
+    historicalPseudoFullscreenCard: null,
+    upperMiddleMetrics: null,
+    upperMiddleMetricsPromise: null,
+    payDistributionMetrics: null,
+    payDistributionMetricsPromise: null,
+    tenureMixMetrics: null,
+    tenureMixMetricsPromise: null,
     analytics: {
         nextSearchSource: 'unknown',
         lastSearchSignature: '',
@@ -981,177 +1101,735 @@ Promise.all([
 // ==========================================
 // INTERACTIVE CHARTS
 // ==========================================
+function destroyHistoricalCharts() {
+    Object.values(state.historicalCharts || {}).forEach(chart => {
+        if (!chart) return;
+        try { chart.destroy(); } catch (e) { /* no-op */ }
+    });
+    state.historicalCharts = {};
+    state.transitionChart = null;
+}
+
+function registerHistoricalChart(key, chart) {
+    if (!chart) return;
+    state.historicalCharts[key] = chart;
+}
+
+// HISTORICAL_QUANTILE_START
+function quantileValue(values, p) {
+    if (!Array.isArray(values) || values.length < 2) return null;
+    const sorted = values.slice().sort((a, b) => a - b);
+    const idx = (sorted.length - 1) * p;
+    const lower = Math.floor(idx);
+    const upper = Math.ceil(idx);
+    if (lower === upper) return sorted[idx];
+    const weight = idx - lower;
+    return sorted[lower] * (1 - weight) + sorted[upper] * weight;
+}
+// HISTORICAL_QUANTILE_END
+
+// HISTORICAL_TENURE_HELPERS_START
+function computeTenureShares(counts, total) {
+    const safeDiv = (num, den) => (den > 0 ? (num / den) * 100 : null);
+    return {
+        lt3: safeDiv(counts.lt3 || 0, total),
+        threeTo7: safeDiv(counts.threeTo7 || 0, total),
+        sevenTo15: safeDiv(counts.sevenTo15 || 0, total),
+        fifteenPlus: safeDiv(counts.fifteenPlus || 0, total)
+    };
+}
+// HISTORICAL_TENURE_HELPERS_END
+
+function loadUpperMiddleManagementMetrics() {
+    if (state.upperMiddleMetrics) return Promise.resolve(state.upperMiddleMetrics);
+    if (state.upperMiddleMetricsPromise) return state.upperMiddleMetricsPromise;
+
+    const includeRe = /(associate director|assistant director|senior director|director|manager|head|chair)/i;
+    const excludeRe = /(vice president|provost|chancellor|president|chief|dean)/i;
+    const dates = state.snapshotDates || [];
+    const byDate = {};
+    dates.forEach(date => {
+        byDate[date] = { date, upper: 0, total: 0, payrollUpper: 0, payrollTotal: 0 };
+    });
+
+    const buckets = [...new Set(state.masterKeys.map(bucketForName))];
+    state.upperMiddleMetricsPromise = forEachWithConcurrency(buckets, 6, (bucket) => {
+        return loadBucket(bucket).then(bucketData => {
+            Object.values(bucketData || {}).forEach(person => {
+                if (!person || !person.Timeline) return;
+                hydratePersonDetail(person);
+                person.Timeline.forEach(snap => {
+                    if (!snap || !snap.Date || !byDate[snap.Date]) return;
+                    const entry = byDate[snap.Date];
+                    const jobs = snap.Jobs || [];
+                    if (jobs.length === 0) return;
+                    const titles = jobs.map(job => (job['Job Title'] || '')).join(' | ');
+                    const isUpper = includeRe.test(titles) && !excludeRe.test(titles);
+                    const pay = snap._pay !== undefined ? snap._pay : calculateSnapshotPay(snap);
+                    entry.total += 1;
+                    entry.payrollTotal += pay;
+                    if (isUpper) {
+                        entry.upper += 1;
+                        entry.payrollUpper += pay;
+                    }
+                });
+            });
+        });
+    })
+        .then(() => {
+            const points = dates.map(date => {
+                const row = byDate[date] || { upper: 0, total: 0, payrollUpper: 0, payrollTotal: 0 };
+                const headcountSharePct = row.total > 0 ? (row.upper / row.total) * 100 : null;
+                const payrollSharePct = row.payrollTotal > 0 ? (row.payrollUpper / row.payrollTotal) * 100 : null;
+                return {
+                    date,
+                    upper: row.upper,
+                    total: row.total,
+                    payrollUpper: row.payrollUpper,
+                    payrollTotal: row.payrollTotal,
+                    headcountSharePct,
+                    payrollSharePct
+                };
+            });
+            state.upperMiddleMetrics = { points };
+            return state.upperMiddleMetrics;
+        })
+        .catch(err => {
+            state.upperMiddleMetrics = null;
+            throw err;
+        })
+        .finally(() => {
+            state.upperMiddleMetricsPromise = null;
+        });
+
+    return state.upperMiddleMetricsPromise;
+}
+
+function loadPayDistributionMetrics() {
+    if (state.payDistributionMetrics) return Promise.resolve(state.payDistributionMetrics);
+    if (state.payDistributionMetricsPromise) return state.payDistributionMetricsPromise;
+
+    const dates = state.snapshotDates || [];
+    const byDate = {};
+    dates.forEach(date => {
+        byDate[date] = { classPays: [], unclassPays: [] };
+    });
+
+    const buckets = [...new Set(state.masterKeys.map(bucketForName))];
+    state.payDistributionMetricsPromise = forEachWithConcurrency(buckets, 6, (bucket) => {
+        return loadBucket(bucket).then(bucketData => {
+            Object.values(bucketData || {}).forEach(person => {
+                if (!person || !person.Timeline) return;
+                hydratePersonDetail(person);
+                person.Timeline.forEach(snap => {
+                    if (!snap || !snap.Date || !byDate[snap.Date]) return;
+                    const pay = snap._pay !== undefined ? snap._pay : calculateSnapshotPay(snap);
+                    const classState = getClassStateFromSource(snap.Source);
+                    if (classState === 'unclassified') {
+                        byDate[snap.Date].unclassPays.push(pay);
+                    } else if (classState === 'classified') {
+                        byDate[snap.Date].classPays.push(pay);
+                    }
+                });
+            });
+        });
+    })
+        .then(() => {
+            const points = dates.map(date => {
+                const entry = byDate[date] || { classPays: [], unclassPays: [] };
+                return {
+                    date,
+                    pct10Class: quantileValue(entry.classPays, 0.1),
+                    pct50Class: quantileValue(entry.classPays, 0.5),
+                    pct90Class: quantileValue(entry.classPays, 0.9),
+                    pct10Unclass: quantileValue(entry.unclassPays, 0.1),
+                    pct50Unclass: quantileValue(entry.unclassPays, 0.5),
+                    pct90Unclass: quantileValue(entry.unclassPays, 0.9)
+                };
+            });
+            state.payDistributionMetrics = { points };
+            return state.payDistributionMetrics;
+        })
+        .catch(err => {
+            state.payDistributionMetrics = null;
+            throw err;
+        })
+        .finally(() => {
+            state.payDistributionMetricsPromise = null;
+        });
+
+    return state.payDistributionMetricsPromise;
+}
+
+function loadTenureMixMetrics() {
+    if (state.tenureMixMetrics) return Promise.resolve(state.tenureMixMetrics);
+    if (state.tenureMixMetricsPromise) return state.tenureMixMetricsPromise;
+
+    const parseDateToTs = (str) => {
+        if (!str) return 0;
+        const direct = new Date(str).getTime();
+        if (!Number.isNaN(direct) && direct > 0) return direct;
+        const match = /^(\d{2})-([A-Za-z]{3})-(\d{4})$/.exec(str.trim());
+        if (match) {
+            const day = Number.parseInt(match[1], 10);
+            const mon = match[2].toUpperCase();
+            const year = Number.parseInt(match[3], 10);
+            const months = { JAN:0, FEB:1, MAR:2, APR:3, MAY:4, JUN:5, JUL:6, AUG:7, SEP:8, OCT:9, NOV:10, DEC:11 };
+            const monthIdx = months[mon];
+            if (monthIdx !== undefined) {
+                const ts = Date.UTC(year, monthIdx, day);
+                return Number.isNaN(ts) ? 0 : ts;
+            }
+        }
+        return 0;
+    };
+
+    const getPersonHireTs = (person) => {
+        if (person._hiredDateTs && person._hiredDateTs > 0) return person._hiredDateTs;
+        let best = 0;
+        (person.Timeline || []).forEach(snap => {
+            const metaHire = snap?.SnapshotDetails?.['First Hired'] || '';
+            const metaTs = parseDateToTs(metaHire);
+            if (metaTs && (best === 0 || metaTs < best)) best = metaTs;
+            const snapTs = parseDateToTs(snap.Date);
+            if (snapTs && (best === 0 || snapTs < best)) best = snapTs;
+        });
+        return best;
+    };
+
+    const dates = state.snapshotDates || [];
+    const byDate = {};
+    dates.forEach(date => {
+        byDate[date] = {
+            classified: { counts: { lt3: 0, threeTo7: 0, sevenTo15: 0, fifteenPlus: 0 }, total: 0 },
+            unclassified: { counts: { lt3: 0, threeTo7: 0, sevenTo15: 0, fifteenPlus: 0 }, total: 0 },
+            overall: { counts: { lt3: 0, threeTo7: 0, sevenTo15: 0, fifteenPlus: 0 }, total: 0 }
+        };
+    });
+
+    const MS_PER_YEAR = 1000 * 60 * 60 * 24 * 365.25;
+    const buckets = [...new Set(state.masterKeys.map(bucketForName))];
+
+    state.tenureMixMetricsPromise = forEachWithConcurrency(buckets, 6, (bucket) => {
+        return loadBucket(bucket).then(bucketData => {
+            Object.values(bucketData || {}).forEach(person => {
+                if (!person || !person.Timeline) return;
+                hydratePersonDetail(person);
+                const hiredTs = getPersonHireTs(person);
+                if (!hiredTs) return; // skip unknown hire dates
+                person.Timeline.forEach(snap => {
+                    if (!snap || !snap.Date || !byDate[snap.Date]) return;
+                    const snapTs = parseDateToTs(snap.Date);
+                    if (Number.isNaN(snapTs) || snapTs <= 0) return;
+                    const tenureYears = (snapTs - hiredTs) / MS_PER_YEAR;
+                    if (tenureYears < 0) return;
+                    let band = 'lt3';
+                    if (tenureYears >= 15) band = 'fifteenPlus';
+                    else if (tenureYears >= 7) band = 'sevenTo15';
+                    else if (tenureYears >= 3) band = 'threeTo7';
+
+                    const classState = getClassStateFromSource(snap.Source);
+                    const bucketObj = classState === 'unclassified'
+                        ? byDate[snap.Date].unclassified
+                        : byDate[snap.Date].classified;
+
+                    bucketObj.counts[band] += 1;
+                    bucketObj.total += 1;
+                    byDate[snap.Date].overall.counts[band] += 1;
+                    byDate[snap.Date].overall.total += 1;
+                });
+            });
+        });
+    })
+        .then(() => {
+            const points = dates.map(date => {
+                const row = byDate[date];
+                const classifiedShares = computeTenureShares(row.classified.counts, row.classified.total);
+                const unclassifiedShares = computeTenureShares(row.unclassified.counts, row.unclassified.total);
+                const overallShares = computeTenureShares(row.overall.counts, row.overall.total);
+                return {
+                    date,
+                    classified: { counts: row.classified.counts, shares: classifiedShares, total: row.classified.total },
+                    unclassified: { counts: row.unclassified.counts, shares: unclassifiedShares, total: row.unclassified.total },
+                    overall: { counts: row.overall.counts, shares: overallShares, total: row.overall.total }
+                };
+            });
+            state.tenureMixMetrics = { points };
+            return state.tenureMixMetrics;
+        })
+        .catch(err => {
+            state.tenureMixMetrics = null;
+            throw err;
+        })
+        .finally(() => {
+            state.tenureMixMetricsPromise = null;
+        });
+
+    return state.tenureMixMetricsPromise;
+}
+
+function resizeHistoricalCharts() {
+    Object.values(state.historicalCharts || {}).forEach(chart => {
+        if (!chart) return;
+        try { chart.resize(); } catch (e) { /* no-op */ }
+    });
+}
+
+function getHistoricalChartByCanvasId(canvasId) {
+    if (!canvasId) return null;
+    const charts = Object.values(state.historicalCharts || {});
+    for (let i = 0; i < charts.length; i++) {
+        const chart = charts[i];
+        if (chart && chart.canvas && chart.canvas.id === canvasId) return chart;
+    }
+    return null;
+}
+
+function clearPseudoHistoricalFullscreen() {
+    if (!state.historicalPseudoFullscreenCard) return;
+    state.historicalPseudoFullscreenCard.classList.remove('pseudo-fullscreen');
+    state.historicalPseudoFullscreenCard = null;
+    document.body.classList.remove('historical-no-scroll');
+    resizeHistoricalCharts();
+}
+
+function enterPseudoHistoricalFullscreen(cardEl) {
+    if (!cardEl) return;
+    clearPseudoHistoricalFullscreen();
+    cardEl.classList.add('pseudo-fullscreen');
+    state.historicalPseudoFullscreenCard = cardEl;
+    document.body.classList.add('historical-no-scroll');
+    resizeHistoricalCharts();
+}
+
+function setupHistoricalChartFullscreen(container) {
+    if (!container || container.dataset.fullscreenBound === 'true') return;
+    container.dataset.fullscreenBound = 'true';
+
+    container.addEventListener('click', (event) => {
+        const button = event.target.closest('.chart-fullscreen-btn');
+        if (!button) return;
+        const cardEl = button.closest('.historical-card');
+        if (!cardEl) return;
+        const canvasId = button.getAttribute('data-canvas-id') || '';
+        const fullscreenEl = document.fullscreenElement;
+
+        if (state.historicalPseudoFullscreenCard === cardEl) {
+            clearPseudoHistoricalFullscreen();
+            return;
+        }
+
+        if (fullscreenEl === cardEl && document.exitFullscreen) {
+            document.exitFullscreen().finally(() => {
+                const chart = getHistoricalChartByCanvasId(canvasId);
+                if (chart) chart.resize();
+            });
+            return;
+        }
+
+        if (cardEl.requestFullscreen) {
+            cardEl.requestFullscreen()
+                .then(() => {
+                    const chart = getHistoricalChartByCanvasId(canvasId);
+                    if (chart) chart.resize();
+                })
+                .catch(() => {
+                    enterPseudoHistoricalFullscreen(cardEl);
+                });
+            return;
+        }
+
+        enterPseudoHistoricalFullscreen(cardEl);
+    });
+
+    if (!state.historicalFullscreenEventsBound) {
+        state.historicalFullscreenEventsBound = true;
+        document.addEventListener('fullscreenchange', () => {
+            setTimeout(resizeHistoricalCharts, 40);
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && state.historicalPseudoFullscreenCard) {
+                clearPseudoHistoricalFullscreen();
+            }
+        });
+    }
+}
+
+// HISTORICAL_METRICS_START
+function buildHistoricalLaborMetrics(history, transitions) {
+    const safeDiv = (num, den) => (den > 0 ? num / den : null);
+    const toYear = (date) => {
+        if (!date || date.length < 4) return null;
+        const yearNum = Number.parseInt(date.slice(0, 4), 10);
+        return Number.isNaN(yearNum) ? null : yearNum;
+    };
+    const toPct = (part, total) => {
+        if (!total || total <= 0) return null;
+        return (part / total) * 100;
+    };
+
+    const sortedHistory = (history || [])
+        .filter(Boolean)
+        .slice()
+        .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+    const points = sortedHistory.map(item => {
+        const classified = Number(item.classified) || 0;
+        const unclassified = Number(item.unclassified) || 0;
+        const payrollClassified = Number(item.payrollClassified) || 0;
+        const payrollUnclassified = Number(item.payrollUnclassified) || 0;
+        const payrollTotal = Number(item.payroll) || (payrollClassified + payrollUnclassified);
+        const totalHeadcount = classified + unclassified;
+        const perCapitaClassified = safeDiv(payrollClassified, classified);
+        const perCapitaUnclassified = safeDiv(payrollUnclassified, unclassified);
+        const perCapitaAll = safeDiv(payrollTotal, totalHeadcount);
+        const payGapDollar = (perCapitaUnclassified !== null && perCapitaClassified !== null)
+            ? perCapitaUnclassified - perCapitaClassified
+            : null;
+        const payGapRatio = perCapitaClassified && perCapitaClassified > 0
+            ? safeDiv(perCapitaUnclassified, perCapitaClassified)
+            : null;
+
+        return {
+            date: item.date || '',
+            year: toYear(item.date),
+            classified,
+            unclassified,
+            totalHeadcount,
+            payrollClassified,
+            payrollUnclassified,
+            payrollTotal,
+            perCapitaClassified,
+            perCapitaUnclassified,
+            perCapitaAll,
+            headcountShareClassifiedPct: toPct(classified, totalHeadcount),
+            headcountShareUnclassifiedPct: toPct(unclassified, totalHeadcount),
+            payrollShareClassifiedPct: toPct(payrollClassified, payrollTotal),
+            payrollShareUnclassifiedPct: toPct(payrollUnclassified, payrollTotal),
+            payGapDollar,
+            payGapRatio
+        };
+    });
+
+    const inflationAvailable = hasInflationData();
+
+    points.forEach(point => {
+        point.perCapitaClassifiedReal = (point.perCapitaClassified !== null && point.perCapitaClassified > 0)
+            ? (inflationAvailable ? adjustForInflation(point.perCapitaClassified, point.date) : point.perCapitaClassified)
+            : null;
+        point.perCapitaUnclassifiedReal = (point.perCapitaUnclassified !== null && point.perCapitaUnclassified > 0)
+            ? (inflationAvailable ? adjustForInflation(point.perCapitaUnclassified, point.date) : point.perCapitaUnclassified)
+            : null;
+    });
+
+    const baseComparable = points.find(point =>
+        point.perCapitaClassifiedReal !== null &&
+        point.perCapitaUnclassifiedReal !== null &&
+        point.perCapitaClassifiedReal > 0 &&
+        point.perCapitaUnclassifiedReal > 0
+    ) || null;
+
+    const baseClassified = baseComparable ? baseComparable.perCapitaClassifiedReal : null;
+    const baseUnclassified = baseComparable ? baseComparable.perCapitaUnclassifiedReal : null;
+
+    points.forEach(point => {
+        point.classifiedIndexedReal = (baseClassified && baseClassified > 0 && point.perCapitaClassifiedReal !== null)
+            ? (point.perCapitaClassifiedReal / baseClassified) * 100
+            : null;
+        point.unclassifiedIndexedReal = (baseUnclassified && baseUnclassified > 0 && point.perCapitaUnclassifiedReal !== null)
+            ? (point.perCapitaUnclassifiedReal / baseUnclassified) * 100
+            : null;
+    });
+
+    const yearEndHeadcount = {};
+    points.forEach(point => {
+        if (point.year !== null) yearEndHeadcount[point.year] = point.totalHeadcount;
+    });
+
+    const transitionPoints = (transitions || [])
+        .filter(Boolean)
+        .map(item => {
+            const year = Number.parseInt(item.year, 10);
+            const toUnclassified = Number(item.toUnclassified) || 0;
+            const toClassified = Number(item.toClassified) || 0;
+            const totalMoves = toUnclassified + toClassified;
+            const endingHeadcount = Number.isNaN(year) ? 0 : (yearEndHeadcount[year] || 0);
+            return {
+                year: Number.isNaN(year) ? null : year,
+                toUnclassified,
+                toClassified,
+                netToUnclassified: toUnclassified - toClassified,
+                yearEndHeadcount: endingHeadcount,
+                transitionRatePer1000: safeDiv(totalMoves * 1000, endingHeadcount)
+            };
+        })
+        .filter(item => item.year !== null)
+        .sort((a, b) => a.year - b.year);
+
+    const latest = points.length ? points[points.length - 1] : null;
+    const kpis = {
+        latestDate: latest ? latest.date : '',
+        classifiedHeadcountSharePct: latest ? latest.headcountShareClassifiedPct : null,
+        classifiedPayrollSharePct: latest ? latest.payrollShareClassifiedPct : null,
+        payGapDollar: latest ? latest.payGapDollar : null,
+        payGapRatio: latest ? latest.payGapRatio : null
+    };
+
+    return {
+        points,
+        latest,
+        transitionPoints,
+        kpis,
+        inflationAvailable,
+        indexBaseDate: baseComparable ? baseComparable.date : null
+    };
+}
+// HISTORICAL_METRICS_END
+
+if (typeof window !== 'undefined') {
+    window.__historicalLaborMetrics = { buildHistoricalLaborMetrics };
+}
+
 function renderInteractiveCharts(history) {
     if (typeof Chart === 'undefined') return;
 
     let container = document.getElementById('historical-charts-container');
     if (!container) return;
 
-    const warningBox = `
-        <div style="background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.3); color: #facc15; padding: 10px; border-radius: 6px; font-size: 0.8rem; margin-bottom: 15px; display: flex; align-items: flex-start; gap: 8px; line-height: 1.4;">
-            <span style="font-size: 1.1rem; line-height: 1;">⚠️</span>
-            <span><strong>Data Incomplete:</strong> These historical charts are based on partial records. Gaps in data may skew trends and totals.</span>
+    try {
+        destroyHistoricalCharts();
+
+        const metrics = buildHistoricalLaborMetrics(history, state.classTransitions || []);
+        const points = metrics.points || [];
+        const latest = metrics.latest || null;
+        const kpis = metrics.kpis || {};
+
+        const fmtPct = (value) => (value === null || value === undefined ? 'n/a' : `${value.toFixed(1)}%`);
+        const perCapitaGapLabel = (kpis.payGapDollar === null || kpis.payGapDollar === undefined)
+            ? 'n/a'
+            : `${formatMoney(kpis.payGapDollar)} (${kpis.payGapRatio ? `${kpis.payGapRatio.toFixed(2)}x` : 'n/a'})`;
+
+        const latestDateLabel = kpis.latestDate ? formatDate(kpis.latestDate) : 'n/a';
+        const labels = points.map(point => point.date);
+        const classifiedHeadcounts = points.map(point => point.classified);
+        const unclassifiedHeadcounts = points.map(point => point.unclassified);
+        const totalHeadcounts = points.map(point => point.totalHeadcount);
+        const classifiedPayroll = points.map(point => point.payrollClassified);
+        const unclassifiedPayroll = points.map(point => point.payrollUnclassified);
+        const totalPayroll = points.map(point => point.payrollTotal);
+        const perCapitaClassified = points.map(point => point.perCapitaClassified);
+        const perCapitaUnclassified = points.map(point => point.perCapitaUnclassified);
+        const perCapitaAll = points.map(point => point.perCapitaAll);
+
+        container.innerHTML = `
+        <div class="historical-warning">
+            <span class="historical-warning-icon">⚠️</span>
+            <span><strong>Data Incomplete:</strong> Historical charts are based on partial records; missing snapshots can skew trends and totals.</span>
         </div>
+        <div id="historical-kpi-strip" class="historical-kpi-strip">
+            <div class="historical-kpi">
+                <div class="historical-kpi-label">Latest Snapshot</div>
+                <div class="historical-kpi-value">${latestDateLabel}</div>
+            </div>
+            <div class="historical-kpi">
+                <div class="historical-kpi-label">Classified Headcount Share</div>
+                <div class="historical-kpi-value">${fmtPct(kpis.classifiedHeadcountSharePct)}</div>
+            </div>
+            <div class="historical-kpi">
+                <div class="historical-kpi-label">Classified Payroll Share</div>
+                <div class="historical-kpi-value">${fmtPct(kpis.classifiedPayrollSharePct)}</div>
+            </div>
+            <div class="historical-kpi">
+                <div class="historical-kpi-label">Per-Capita Gap (Unclass - Class)</div>
+                <div class="historical-kpi-value">${perCapitaGapLabel}</div>
+            </div>
+        </div>
+        <div id="historical-core-grid" class="historical-core-grid">
+            <div class="stat-card historical-card historical-hero-card">
+                <div class="chart-title-row">
+                    <div class="stat-label">Headcount by Classification</div>
+                    <span class="chart-info-icon help-cursor" data-tooltip="Shows workforce counts across snapshots for Classified and Unclassified employees, plus a Total line. Use this to see whether labor composition is shifting over time, not just at the latest snapshot." aria-label="Chart explainer: Headcount by Classification" tabindex="0">i</span>
+                </div>
+                <button type="button" class="chart-fullscreen-btn" data-canvas-id="chart-headcount" aria-label="View Headcount by Classification in fullscreen">⛶</button>
+                <div class="historical-canvas-wrap"><canvas id="chart-headcount"></canvas></div>
+                <div class="stat-sub">Classified and Unclassified trends, with total headcount overlay.</div>
+            </div>
+            <div class="historical-primary-grid">
+            <div class="stat-card historical-card">
+                <div class="chart-title-row">
+                    <div class="stat-label">Total Payroll by Classification</div>
+                    <span class="chart-info-icon help-cursor" data-tooltip="Displays total payroll trend by classification. Payroll is computed as Annual Salary Rate × Appt Percent for each record, then summed by snapshot. Compare lines to understand where compensation dollars are concentrated over time." aria-label="Chart explainer: Total Payroll by Classification" tabindex="0">i</span>
+                </div>
+                <button type="button" class="chart-fullscreen-btn" data-canvas-id="chart-payroll" aria-label="View Total Payroll by Classification in fullscreen">⛶</button>
+                <div class="historical-canvas-wrap"><canvas id="chart-payroll"></canvas></div>
+                <div class="stat-sub">Payroll totals are computed as Salary Rate × Appointment Percent.</div>
+            </div>
+            <div class="stat-card historical-card">
+                <div class="chart-title-row">
+                    <div class="stat-label">Latest Headcount Split</div>
+                    <span class="chart-info-icon help-cursor" data-tooltip="Pie of the most recent snapshot only. It shows the current share of Classified vs Unclassified workers and does not indicate trend direction by itself." aria-label="Chart explainer: Latest Headcount Split" tabindex="0">i</span>
+                </div>
+                <button type="button" class="chart-fullscreen-btn" data-canvas-id="chart-headcount-split" aria-label="View Latest Headcount Split in fullscreen">⛶</button>
+                <div class="historical-canvas-wrap short"><canvas id="chart-headcount-split"></canvas></div>
+                <div class="stat-sub">Current workforce composition by classification.</div>
+            </div>
+            <div class="stat-card historical-card">
+                <div class="chart-title-row">
+                    <div class="stat-label">Per-Capita Pay Trend</div>
+                    <span class="chart-info-icon help-cursor" data-tooltip="Tracks average payroll per person for All, Classified, and Unclassified groups by snapshot. Divergence between lines indicates changes in relative compensation levels, mix, or both." aria-label="Chart explainer: Per-Capita Pay Trend" tabindex="0">i</span>
+                </div>
+                <button type="button" class="chart-fullscreen-btn" data-canvas-id="chart-per-capita" aria-label="View Per-Capita Pay Trend in fullscreen">⛶</button>
+                <div class="historical-canvas-wrap"><canvas id="chart-per-capita"></canvas></div>
+                <div class="stat-sub">Average pay per person over time for each classification.</div>
+            </div>
+            <div class="stat-card historical-card">
+                <div class="chart-title-row">
+                    <div class="stat-label">Latest Payroll Share</div>
+                    <span class="chart-info-icon help-cursor" data-tooltip="Pie of current payroll distribution between Classified and Unclassified groups in the latest snapshot. Useful for comparing spending share to headcount share." aria-label="Chart explainer: Latest Payroll Share" tabindex="0">i</span>
+                </div>
+                <button type="button" class="chart-fullscreen-btn" data-canvas-id="chart-payroll-share" aria-label="View Latest Payroll Share in fullscreen">⛶</button>
+                <div class="historical-canvas-wrap short"><canvas id="chart-payroll-share"></canvas></div>
+                <div class="stat-sub">Current compensation distribution by classification.</div>
+            </div>
+            </div>
+        </div>
+        <div class="historical-expand-row">
+            <button type="button" id="historical-advanced-toggle" class="section-toggle historical-more-btn" aria-expanded="false">
+                More labor charts
+            </button>
+        </div>
+        <div id="historical-advanced-panel" class="historical-advanced-panel hidden" aria-hidden="true"></div>
     `;
+        setupHistoricalChartFullscreen(container);
 
-    container.innerHTML = `
-        <div class="stat-card wide">
-            <div class="stat-label">Historical Personnel Count</div>
-            ${warningBox}
-            <div style="height: 300px; position: relative;">
-                <canvas id="chart-personnel"></canvas>
-            </div>
-        </div>
-        <div class="stat-card wide">
-            <div class="stat-label">Total Compensation Trend</div>
-            ${warningBox}
-             <div style="height: 300px; position: relative;">
-                <canvas id="chart-payroll"></canvas>
-            </div>
-        </div>
-        <div class="stat-card wide">
-            <div class="stat-label help-cursor" data-tooltip="Counts a transition when a person switches classification between consecutive snapshots. Year reflects the later snapshot.">
-                Classification Transitions
-            </div>
-            ${warningBox}
-            <div style="height: 260px; position: relative;">
-                <canvas id="chart-transitions"></canvas>
-            </div>
-            <div class="stat-sub">Classified → Unclassified (exclusions) and the reverse.</div>
-        </div>
-        <div class="stat-card wide" id="exclusions-list-card">
-            <div class="stat-label help-cursor" data-tooltip="Average total pay per person in each snapshot.">
-                Avg Pay Per Person
-            </div>
-            ${warningBox}
-            <div style="height: 260px; position: relative;">
-                <canvas id="chart-per-capita"></canvas>
-            </div>
-        </div>
-    `;
-
-    const commonOptions = {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-            legend: { labels: { color: '#ccc' } },
-            tooltip: { mode: 'index', intersect: false }
-        },
-        scales: {
-            x: { ticks: { color: '#888' }, grid: { color: '#333' } },
-            y: { ticks: { color: '#888' }, grid: { color: '#333' } }
-        }
-    };
-
-    new Chart(document.getElementById('chart-personnel').getContext('2d'), {
-        type: 'bar',
-        data: {
-            labels: history.map(d => d.date),
-            datasets: [
-                { label: 'Classified', data: history.map(d => d.classified), backgroundColor: '#8b5cf6', stack: 'Stack 0' },
-                { label: 'Unclassified', data: history.map(d => d.unclassified), backgroundColor: '#f97316', stack: 'Stack 0' }
-            ]
-        },
-        options: commonOptions
-    });
-
-    const trendData = calculateMovingAverage(history, 3, (d) => d.payroll);
-
-    new Chart(document.getElementById('chart-payroll').getContext('2d'), {
+        registerHistoricalChart('headcount', new Chart(document.getElementById('chart-headcount').getContext('2d'), {
         type: 'line',
         data: {
-            labels: history.map(d => d.date),
+            labels,
             datasets: [
+                {
+                    label: 'Classified',
+                    data: classifiedHeadcounts,
+                    borderColor: '#8b5cf6',
+                    backgroundColor: 'rgba(139, 92, 246, 0.22)',
+                    fill: true,
+                    tension: 0.25
+                },
+                {
+                    label: 'Unclassified',
+                    data: unclassifiedHeadcounts,
+                    borderColor: '#f97316',
+                    backgroundColor: 'rgba(249, 115, 22, 0.2)',
+                    fill: true,
+                    tension: 0.25
+                },
+                {
+                    label: 'Total',
+                    data: totalHeadcounts,
+                    borderColor: '#60a5fa',
+                    borderDash: [6, 4],
+                    fill: false,
+                    tension: 0.2,
+                    pointRadius: 1
+                }
+            ]
+        },
+        options: getChartOptions({
+            yTickCallback: (value) => Number(value).toLocaleString(),
+            animation: false,
+            xTickLimit: 8
+        })
+    }));
+
+        registerHistoricalChart('payroll', new Chart(document.getElementById('chart-payroll').getContext('2d'), {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: 'Classified Payroll',
+                    data: classifiedPayroll,
+                    borderColor: '#8b5cf6',
+                    backgroundColor: 'rgba(139, 92, 246, 0.2)',
+                    fill: true,
+                    tension: 0.25
+                },
+                {
+                    label: 'Unclassified Payroll',
+                    data: unclassifiedPayroll,
+                    borderColor: '#f97316',
+                    backgroundColor: 'rgba(249, 115, 22, 0.2)',
+                    fill: true,
+                    tension: 0.25
+                },
                 {
                     label: 'Total Payroll',
-                    data: history.map(d => d.payroll),
+                    data: totalPayroll,
                     borderColor: '#22c55e',
-                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
-                    fill: true,
-                    tension: 0.3,
-                    order: 2
-                },
-                {
-                    label: '3-Year Moving Avg',
-                    data: trendData,
-                    borderColor: '#fbbf24',
-                    borderDash: [5, 5],
+                    borderDash: [6, 4],
                     fill: false,
-                    pointRadius: 0,
-                    borderWidth: 2,
-                    order: 1
+                    tension: 0.2,
+                    pointRadius: 1
                 }
             ]
         },
+        options: getChartOptions({
+            yTickCallback: (value) => formatMoney(value),
+            animation: false,
+            xTickLimit: 8
+        })
+    }));
+
+        const latestHeadcountSplit = latest
+            ? [latest.classified || 0, latest.unclassified || 0]
+            : [0, 0];
+        registerHistoricalChart('headcountSplit', new Chart(document.getElementById('chart-headcount-split').getContext('2d'), {
+        type: 'doughnut',
+        data: {
+            labels: ['Classified', 'Unclassified'],
+            datasets: [{
+                data: latestHeadcountSplit,
+                backgroundColor: ['#8b5cf6', '#f97316'],
+                borderColor: '#2c2c2c',
+                borderWidth: 2
+            }]
+        },
         options: {
-            ...commonOptions,
-            scales: {
-                ...commonOptions.scales,
-                y: {
-                    ...commonOptions.scales.y,
-                    ticks: {
-                        color: '#888',
-                        callback: function(value) { return '$' + (value / 1000000).toFixed(1) + 'M'; }
-                    }
-                }
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { color: '#ccc' } }
             }
         }
-    });
+    }));
 
-    const transitions = state.classTransitions || [];
-    if (transitions.length) {
-        state.transitionChart = new Chart(document.getElementById('chart-transitions').getContext('2d'), {
-            type: 'bar',
+        const latestPayrollSplit = latest
+            ? [latest.payrollClassified || 0, latest.payrollUnclassified || 0]
+            : [0, 0];
+        registerHistoricalChart('payrollShare', new Chart(document.getElementById('chart-payroll-share').getContext('2d'), {
+            type: 'doughnut',
             data: {
-                labels: transitions.map(d => d.year),
-                datasets: [
-                    {
-                        label: 'Classified → Unclassified',
-                        data: transitions.map(d => d.toUnclassified || 0),
-                        backgroundColor: '#f97316'
-                    },
-                    {
-                        label: 'Unclassified → Classified',
-                        data: transitions.map(d => d.toClassified || 0),
-                        backgroundColor: '#8b5cf6'
-                    }
-                ]
+                labels: ['Classified Payroll', 'Unclassified Payroll'],
+                datasets: [{
+                    data: latestPayrollSplit,
+                    backgroundColor: ['#8b5cf6', '#f97316'],
+                    borderColor: '#2c2c2c',
+                    borderWidth: 2
+                }]
             },
             options: {
-                ...commonOptions,
-                onClick: (_, activeElements) => {
-                    if (!activeElements || !activeElements.length) return;
-                    const { index, datasetIndex } = activeElements[0];
-                    const point = transitions[index];
-                    if (!point) return;
-                    const direction = datasetIndex === 0 ? 'toUnclassified' : 'toClassified';
-                    applyTransitionFilter(point.year, direction);
-                },
-                onHover: (event, activeElements) => {
-                    const canvas = event?.native?.target;
-                    if (!canvas) return;
-                    canvas.style.cursor = (activeElements && activeElements.length) ? 'pointer' : 'default';
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom', labels: { color: '#ccc' } }
                 }
             }
-        });
-    }
+        }));
 
-    const perCapitaAll = history.map(d => {
-        const count = (d.classified || 0) + (d.unclassified || 0);
-        return count > 0 ? d.payroll / count : 0;
-    });
-    const perCapitaClassified = history.map(d => {
-        const count = d.classified || 0;
-        return count > 0 ? (d.payrollClassified || 0) / count : 0;
-    });
-    const perCapitaUnclassified = history.map(d => {
-        const count = d.unclassified || 0;
-        return count > 0 ? (d.payrollUnclassified || 0) / count : 0;
-    });
-    new Chart(document.getElementById('chart-per-capita').getContext('2d'), {
+        registerHistoricalChart('perCapita', new Chart(document.getElementById('chart-per-capita').getContext('2d'), {
         type: 'line',
         data: {
-            labels: history.map(d => d.date),
+            labels,
             datasets: [
                 {
                     label: 'All',
@@ -1182,9 +1860,529 @@ function renderInteractiveCharts(history) {
         options: getChartOptions({
             yTickCallback: (value) => formatMoney(value),
             animation: false,
-            xTickLimit: 6
+            xTickLimit: 8
         })
-    });
+    }));
+
+        state.historicalAdvancedRendered = false;
+        const advancedPanel = document.getElementById('historical-advanced-panel');
+        const advancedToggle = document.getElementById('historical-advanced-toggle');
+        if (!advancedPanel || !advancedToggle) return;
+
+        const renderAdvancedHistoricalCharts = () => {
+        if (state.historicalAdvancedRendered) return;
+        state.historicalAdvancedRendered = true;
+
+        const transitionPoints = metrics.transitionPoints || [];
+        const transitionLabels = transitionPoints.map(point => String(point.year));
+        const transitionOut = transitionPoints.map(point => point.toUnclassified);
+        const transitionIn = transitionPoints.map(point => point.toClassified);
+        const transitionNet = transitionPoints.map(point => point.netToUnclassified);
+        const transitionRate = transitionPoints.map(point => point.transitionRatePer1000);
+        const payGapDollar = points.map(point => point.payGapDollar);
+        const payGapRatio = points.map(point => point.payGapRatio);
+
+        advancedPanel.innerHTML = `
+            <div class="historical-advanced-grid">
+                <div class="stat-card historical-card">
+                    <div class="chart-title-row">
+                        <div class="stat-label">Classification Transitions</div>
+                        <span class="chart-info-icon help-cursor" data-tooltip="Counts classification switches between consecutive snapshots. Bars show gross flows (Classified→Unclassified and reverse); the line shows net movement to Unclassified. Click either bar to apply the transition filter." aria-label="Chart explainer: Classification Transitions" tabindex="0">i</span>
+                    </div>
+                    <button type="button" class="chart-fullscreen-btn" data-canvas-id="chart-transitions" aria-label="View Classification Transitions in fullscreen">⛶</button>
+                    <div class="historical-canvas-wrap"><canvas id="chart-transitions"></canvas></div>
+                    <div class="stat-sub">Bar: gross moves. Line: net movement to unclassified.</div>
+                </div>
+                <div class="stat-card historical-card">
+                    <div class="chart-title-row">
+                        <div class="stat-label">Transition Intensity</div>
+                        <span class="chart-info-icon help-cursor" data-tooltip="Normalizes transition volume by workforce size using: (toUnclassified + toClassified) / yearEndHeadcount × 1000. Higher values indicate more classification churn per 1,000 workers." aria-label="Chart explainer: Transition Intensity" tabindex="0">i</span>
+                    </div>
+                    <button type="button" class="chart-fullscreen-btn" data-canvas-id="chart-transition-intensity" aria-label="View Transition Intensity in fullscreen">⛶</button>
+                    <div class="historical-canvas-wrap"><canvas id="chart-transition-intensity"></canvas></div>
+                    <div class="stat-sub">Annual transitions per 1,000 workers (using same-year ending headcount).</div>
+                </div>
+                <div class="stat-card historical-card">
+                    <div class="chart-title-row">
+                        <div class="stat-label">Indexed Per-Capita Pay (Base 100)</div>
+                        <span class="chart-info-icon help-cursor" data-tooltip="Indexes classified and unclassified per-capita pay to the first comparable snapshot (base=100). Values above 100 are higher than baseline; below 100 are lower. Uses CPI-adjusted values when inflation data is available, otherwise nominal fallback." aria-label="Chart explainer: Indexed Per-Capita Pay" tabindex="0">i</span>
+                    </div>
+                    <button type="button" class="chart-fullscreen-btn" data-canvas-id="chart-indexed-pay" aria-label="View Indexed Per-Capita Pay in fullscreen">⛶</button>
+                    <div class="historical-canvas-wrap"><canvas id="chart-indexed-pay"></canvas></div>
+                    <div class="stat-sub">${metrics.indexBaseDate ? `Base snapshot: ${formatDate(metrics.indexBaseDate)}.` : 'Insufficient baseline data.'} ${metrics.inflationAvailable ? 'CPI-adjusted.' : 'Nominal fallback (inflation data unavailable).'}</div>
+                </div>
+                <div class="stat-card historical-card">
+                    <div class="chart-title-row">
+                        <div class="stat-label">Per-Head Cost Gap</div>
+                        <span class="chart-info-icon help-cursor" data-tooltip="Compares unclassified vs classified cost per person over time. Dollar gap is Unclassified per-head minus Classified per-head. Ratio is Unclassified divided by Classified; values above 1.0 indicate higher unclassified cost per head." aria-label="Chart explainer: Per-Head Cost Gap" tabindex="0">i</span>
+                    </div>
+                    <button type="button" class="chart-fullscreen-btn" data-canvas-id="chart-per-head-gap" aria-label="View Per-Head Cost Gap in fullscreen">⛶</button>
+                    <div class="historical-canvas-wrap"><canvas id="chart-per-head-gap"></canvas></div>
+                    <div class="stat-sub">Dollar and ratio view of the unclassified vs classified per-head cost spread.</div>
+                </div>
+                <div class="stat-card historical-card">
+                    <div class="chart-title-row">
+                        <div class="stat-label">Upper-Middle Management Expansion</div>
+                        <span class="chart-info-icon help-cursor" data-tooltip="Tracks the number and share of roles with upper-middle management style titles across snapshots using a title heuristic (includes: director/manager/head/chair; excludes: vice president/provost/chancellor/president/chief/dean)." aria-label="Chart explainer: Upper-Middle Management Expansion" tabindex="0">i</span>
+                    </div>
+                    <button type="button" class="chart-fullscreen-btn" data-canvas-id="chart-upper-mgmt" aria-label="View Upper-Middle Management Expansion in fullscreen">⛶</button>
+                    <div class="historical-canvas-wrap"><canvas id="chart-upper-mgmt"></canvas></div>
+                    <div class="stat-sub" id="upper-mgmt-status">Loading upper-middle management trend from detailed buckets...</div>
+                </div>
+                <div class="stat-card historical-card">
+                    <div class="chart-title-row">
+                        <div class="stat-label">Upper-Middle Payroll vs Headcount Share</div>
+                        <span class="chart-info-icon help-cursor" data-tooltip="Compares upper-middle roles’ share of total headcount versus their share of payroll using the same title heuristic. Spread line shows payroll share minus headcount share; positive spread means payroll is growing faster than their numbers." aria-label="Chart explainer: Upper-Middle Payroll vs Headcount Share" tabindex="0">i</span>
+                    </div>
+                    <button type="button" class="chart-fullscreen-btn" data-canvas-id="chart-upper-mgmt-share" aria-label="View Upper-Middle Payroll vs Headcount Share in fullscreen">⛶</button>
+                    <div class="historical-canvas-wrap"><canvas id="chart-upper-mgmt-share"></canvas></div>
+                    <div class="stat-sub" id="upper-mgmt-share-status">Loading upper-middle share comparison...</div>
+                </div>
+                <div class="stat-card historical-card">
+                    <div class="chart-title-row">
+                        <div class="stat-label">Pay Distribution Percentiles</div>
+                        <span class="chart-info-icon help-cursor" data-tooltip="Shows P10/P50/P90 pay levels (nominal dollars) for Classified and Unclassified employees per snapshot. Solid lines = Classified; dashed = Unclassified. Useful for seeing shifts in typical and tail pay." aria-label="Chart explainer: Pay Distribution Percentiles" tabindex="0">i</span>
+                    </div>
+                    <button type="button" class="chart-fullscreen-btn" data-canvas-id="chart-pay-percentiles" aria-label="View Pay Distribution Percentiles in fullscreen">⛶</button>
+                    <div class="historical-canvas-wrap"><canvas id="chart-pay-percentiles"></canvas></div>
+                    <div class="stat-sub" id="pay-percentiles-status">Loading percentile curves...</div>
+                </div>
+                <div class="stat-card historical-card">
+                    <div class="chart-title-row">
+                        <div class="stat-label">Tenure Mix by Classification</div>
+                        <span class="chart-info-icon help-cursor" data-tooltip="100% stacked bars for each snapshot, grouped by classification. Bands: <3y, 3-7y, 7-15y, 15y+. Each bar is percent of that classification’s headcount." aria-label="Chart explainer: Tenure Mix by Classification" tabindex="0">i</span>
+                    </div>
+                    <button type="button" class="chart-fullscreen-btn" data-canvas-id="chart-tenure-mix" aria-label="View Tenure Mix by Classification in fullscreen">⛶</button>
+                    <div class="historical-canvas-wrap"><canvas id="chart-tenure-mix"></canvas></div>
+                    <div class="stat-sub" id="tenure-mix-status">Loading tenure mix breakdown...</div>
+                </div>
+            </div>
+        `;
+
+        const transitionChart = new Chart(document.getElementById('chart-transitions').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: transitionLabels,
+                datasets: [
+                    {
+                        label: 'Classified → Unclassified',
+                        data: transitionOut,
+                        backgroundColor: '#f97316'
+                    },
+                    {
+                        label: 'Unclassified → Classified',
+                        data: transitionIn,
+                        backgroundColor: '#8b5cf6'
+                    },
+                    {
+                        type: 'line',
+                        label: 'Net to Unclassified',
+                        data: transitionNet,
+                        borderColor: '#60a5fa',
+                        pointBackgroundColor: '#60a5fa',
+                        fill: false,
+                        tension: 0.2
+                    }
+                ]
+            },
+            options: {
+                ...getChartOptions({
+                    yTickCallback: (value) => Number(value).toLocaleString(),
+                    animation: false,
+                    xTickLimit: 8
+                }),
+                onClick: (_, activeElements) => {
+                    if (!activeElements || !activeElements.length) return;
+                    const { index, datasetIndex } = activeElements[0];
+                    if (datasetIndex > 1) return;
+                    const point = transitionPoints[index];
+                    if (!point) return;
+                    const direction = datasetIndex === 0 ? 'toUnclassified' : 'toClassified';
+                    applyTransitionFilter(point.year, direction);
+                },
+                onHover: (event, activeElements) => {
+                    const canvas = event?.native?.target;
+                    if (!canvas) return;
+                    const active = activeElements && activeElements.length && activeElements[0].datasetIndex <= 1;
+                    canvas.style.cursor = active ? 'pointer' : 'default';
+                }
+            }
+        });
+        registerHistoricalChart('transitions', transitionChart);
+        state.transitionChart = transitionChart;
+
+        registerHistoricalChart('transitionIntensity', new Chart(document.getElementById('chart-transition-intensity').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: transitionLabels,
+                datasets: [
+                    {
+                        label: 'Transitions per 1,000 workers',
+                        data: transitionRate,
+                        borderColor: '#22c55e',
+                        backgroundColor: 'rgba(34, 197, 94, 0.12)',
+                        fill: true,
+                        tension: 0.25
+                    }
+                ]
+            },
+            options: getChartOptions({
+                yTickCallback: (value) => (value === null || value === undefined ? 'n/a' : Number(value).toFixed(1)),
+                animation: false,
+                xTickLimit: 8
+            })
+        }));
+
+        registerHistoricalChart('indexedPay', new Chart(document.getElementById('chart-indexed-pay').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: 'Classified',
+                        data: points.map(point => point.classifiedIndexedReal),
+                        borderColor: '#8b5cf6',
+                        backgroundColor: 'rgba(139, 92, 246, 0.12)',
+                        fill: false,
+                        tension: 0.2
+                    },
+                    {
+                        label: 'Unclassified',
+                        data: points.map(point => point.unclassifiedIndexedReal),
+                        borderColor: '#f97316',
+                        backgroundColor: 'rgba(249, 115, 22, 0.12)',
+                        fill: false,
+                        tension: 0.2
+                    }
+                ]
+            },
+            options: getChartOptions({
+                yTickCallback: (value) => (value === null || value === undefined ? 'n/a' : `${Number(value).toFixed(1)}`),
+                animation: false,
+                xTickLimit: 8
+            })
+        }));
+
+        registerHistoricalChart('perHeadGap', new Chart(document.getElementById('chart-per-head-gap').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: 'Dollar Gap (Unclass - Class)',
+                        data: payGapDollar,
+                        borderColor: '#fbbf24',
+                        backgroundColor: 'rgba(251, 191, 36, 0.12)',
+                        fill: true,
+                        tension: 0.25,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'Per-Head Ratio (Unclass / Class)',
+                        data: payGapRatio,
+                        borderColor: '#60a5fa',
+                        fill: false,
+                        tension: 0.2,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                ...getChartOptions({
+                    yTickCallback: (value) => formatMoney(value),
+                    animation: false,
+                    xTickLimit: 8
+                }),
+                scales: {
+                    x: { ticks: { color: '#888' }, grid: { color: '#333' } },
+                    y: {
+                        ticks: { color: '#888', callback: (value) => formatMoney(value) },
+                        grid: { color: '#333' }
+                    },
+                    y1: {
+                        position: 'right',
+                        ticks: { color: '#888', callback: (value) => `${Number(value).toFixed(2)}x` },
+                        grid: { drawOnChartArea: false, color: '#333' }
+                    }
+                }
+            }
+        }));
+
+        loadUpperMiddleManagementMetrics()
+            .then((upperMetrics) => {
+                const upperPoints = (upperMetrics && upperMetrics.points) ? upperMetrics.points : [];
+                const upperLabels = upperPoints.map(point => point.date);
+                const upperCount = upperPoints.map(point => point.upper);
+                const upperShare = upperPoints.map(point => point.headcountSharePct);
+                const upperPayrollShare = upperPoints.map(point => point.payrollSharePct);
+                const upperSpread = upperPoints.map(point => {
+                    if (point.payrollSharePct === null || point.headcountSharePct === null) return null;
+                    return point.payrollSharePct - point.headcountSharePct;
+                });
+                const statusEl = document.getElementById('upper-mgmt-status');
+                if (statusEl) statusEl.textContent = 'Upper-middle title trend from detailed per-snapshot role heuristics.';
+
+                registerHistoricalChart('upperManagement', new Chart(document.getElementById('chart-upper-mgmt').getContext('2d'), {
+                    type: 'line',
+                    data: {
+                        labels: upperLabels,
+                        datasets: [
+                            {
+                                label: 'Upper-Middle Headcount',
+                                data: upperCount,
+                                borderColor: '#34d399',
+                                backgroundColor: 'rgba(52, 211, 153, 0.14)',
+                                fill: true,
+                                tension: 0.2,
+                                yAxisID: 'y'
+                            },
+                            {
+                                label: 'Share of Headcount',
+                                data: upperShare,
+                                borderColor: '#a78bfa',
+                                fill: false,
+                                tension: 0.2,
+                                yAxisID: 'y1'
+                            }
+                        ]
+                    },
+                    options: {
+                        ...getChartOptions({
+                            yTickCallback: (value) => Number(value).toLocaleString(),
+                            animation: false,
+                            xTickLimit: 8
+                        }),
+                        scales: {
+                            x: { ticks: { color: '#888' }, grid: { color: '#333' } },
+                            y: {
+                                ticks: { color: '#888', callback: (value) => Number(value).toLocaleString() },
+                                grid: { color: '#333' }
+                            },
+                            y1: {
+                                position: 'right',
+                                ticks: { color: '#888', callback: (value) => `${Number(value).toFixed(1)}%` },
+                                grid: { drawOnChartArea: false, color: '#333' }
+                            }
+                        }
+                    }
+                }));
+
+                const shareStatus = document.getElementById('upper-mgmt-share-status');
+                if (shareStatus) shareStatus.textContent = 'Headcount vs payroll share with spread line.';
+
+                registerHistoricalChart('upperManagementShare', new Chart(document.getElementById('chart-upper-mgmt-share').getContext('2d'), {
+                    type: 'line',
+                    data: {
+                        labels: upperLabels,
+                        datasets: [
+                            {
+                                label: 'Headcount Share',
+                                data: upperShare,
+                                borderColor: '#60a5fa',
+                                backgroundColor: 'rgba(96, 165, 250, 0.12)',
+                                fill: false,
+                                tension: 0.2,
+                                yAxisID: 'y'
+                            },
+                            {
+                                label: 'Payroll Share',
+                                data: upperPayrollShare,
+                                borderColor: '#f59e0b',
+                                backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                                fill: false,
+                                tension: 0.2,
+                                yAxisID: 'y'
+                            },
+                            {
+                                label: 'Spread (Payroll - Headcount)',
+                                data: upperSpread,
+                                borderColor: '#a78bfa',
+                                borderDash: [6, 4],
+                                fill: false,
+                                tension: 0.2,
+                                yAxisID: 'y'
+                            }
+                        ]
+                    },
+                    options: {
+                        ...getChartOptions({
+                            yTickCallback: (value) => (value === null || value === undefined ? 'n/a' : `${Number(value).toFixed(1)}%`),
+                            animation: false,
+                            xTickLimit: 8
+                        })
+                    }
+                }));
+            })
+            .catch((err) => {
+                const statusEl = document.getElementById('upper-mgmt-status');
+                if (statusEl) {
+                    statusEl.textContent = 'Could not compute upper-middle management trend from bucket data.';
+                    statusEl.classList.add('status-error');
+                }
+                console.error('Upper-middle management chart failed', err);
+            });
+
+        loadPayDistributionMetrics()
+            .then(dist => {
+                const points = (dist && dist.points) ? dist.points : [];
+                const labels = points.map(p => p.date);
+                const statusEl = document.getElementById('pay-percentiles-status');
+                if (statusEl) statusEl.textContent = points.length ? 'Percentile curves (nominal dollars).' : 'No pay distribution data.';
+
+                registerHistoricalChart('payPercentiles', new Chart(document.getElementById('chart-pay-percentiles').getContext('2d'), {
+                    type: 'line',
+                    data: {
+                        labels,
+                        datasets: [
+                            {
+                                label: 'Classified P90',
+                                data: points.map(p => p.pct90Class),
+                                borderColor: '#8b5cf6',
+                                backgroundColor: 'rgba(139, 92, 246, 0.05)',
+                                fill: false,
+                                tension: 0.25
+                            },
+                            {
+                                label: 'Classified P50',
+                                data: points.map(p => p.pct50Class),
+                                borderColor: '#6ee7b7',
+                                backgroundColor: 'rgba(110, 231, 183, 0.05)',
+                                fill: false,
+                                tension: 0.25
+                            },
+                            {
+                                label: 'Classified P10',
+                                data: points.map(p => p.pct10Class),
+                                borderColor: '#22c55e',
+                                backgroundColor: 'rgba(34, 197, 94, 0.05)',
+                                fill: false,
+                                tension: 0.25
+                            },
+                            {
+                                label: 'Unclassified P90',
+                                data: points.map(p => p.pct90Unclass),
+                                borderColor: '#f97316',
+                                borderDash: [8, 4],
+                                fill: false,
+                                tension: 0.25
+                            },
+                            {
+                                label: 'Unclassified P50',
+                                data: points.map(p => p.pct50Unclass),
+                                borderColor: '#fbbf24',
+                                borderDash: [8, 4],
+                                fill: false,
+                                tension: 0.25
+                            },
+                            {
+                                label: 'Unclassified P10',
+                                data: points.map(p => p.pct10Unclass),
+                                borderColor: '#fde68a',
+                                borderDash: [8, 4],
+                                fill: false,
+                                tension: 0.25
+                            }
+                        ]
+                    },
+                    options: getChartOptions({
+                        yTickCallback: (value) => formatMoney(value),
+                        animation: false,
+                        xTickLimit: 8,
+                        legend: true
+                    })
+                }));
+            })
+            .catch(err => {
+                console.error('Failed to load pay distribution metrics', err);
+                const statusEl = document.getElementById('pay-percentiles-status');
+                if (statusEl) {
+                    statusEl.textContent = 'Unable to load pay distribution percentiles.';
+                    statusEl.classList.add('status-error');
+                }
+            });
+
+        loadTenureMixMetrics()
+            .then(res => {
+                const points = (res && res.points) ? res.points : [];
+                const labels = points.map(p => p.date);
+                const statusEl = document.getElementById('tenure-mix-status');
+                if (statusEl) statusEl.textContent = points.length ? 'Percent of each classification by tenure band.' : 'No tenure data.';
+
+                const bandColors = {
+                    lt3: '#4ade80',
+                    threeTo7: '#60a5fa',
+                    sevenTo15: '#a78bfa',
+                    fifteenPlus: '#f97316'
+                };
+
+                const makeDataset = (bandKey, label, stack, color) => ({
+                    label: `${label} (${stack === 'class' ? 'Classified' : 'Unclassified'})`,
+                    data: points.map(p => {
+                        const bucket = stack === 'class' ? p.classified : p.unclassified;
+                        const share = bucket && bucket.shares ? bucket.shares[bandKey] : null;
+                        return share;
+                    }),
+                    backgroundColor: color,
+                    borderColor: color,
+                    stack,
+                    borderWidth: 1
+                });
+
+                registerHistoricalChart('tenureMix', new Chart(document.getElementById('chart-tenure-mix').getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels,
+                        datasets: [
+                            makeDataset('lt3', '<3y', 'class', bandColors.lt3),
+                            makeDataset('threeTo7', '3-7y', 'class', bandColors.threeTo7),
+                            makeDataset('sevenTo15', '7-15y', 'class', bandColors.sevenTo15),
+                            makeDataset('fifteenPlus', '15y+', 'class', bandColors.fifteenPlus),
+                            makeDataset('lt3', '<3y', 'unclass', hexToRgba(bandColors.lt3, 0.55)),
+                            makeDataset('threeTo7', '3-7y', 'unclass', hexToRgba(bandColors.threeTo7, 0.55)),
+                            makeDataset('sevenTo15', '7-15y', 'unclass', hexToRgba(bandColors.sevenTo15, 0.55)),
+                            makeDataset('fifteenPlus', '15y+', 'unclass', hexToRgba(bandColors.fifteenPlus, 0.55))
+                        ]
+                    },
+                    options: {
+                        ...getChartOptions({
+                            yTickCallback: (value) => (value === null || value === undefined ? 'n/a' : `${Number(value).toFixed(0)}%`),
+                            animation: false,
+                            xTickLimit: 8,
+                            legend: true
+                        }),
+                        scales: {
+                            x: { stacked: true, ticks: { color: '#888' }, grid: { color: '#333' } },
+                            y: { stacked: true, ticks: { color: '#888', callback: (value) => `${Number(value).toFixed(0)}%` }, grid: { color: '#333' }, suggestedMax: 100 }
+                        }
+                    }
+                }));
+            })
+            .catch(err => {
+                console.error('Failed to load tenure mix metrics', err);
+                const statusEl = document.getElementById('tenure-mix-status');
+                if (statusEl) {
+                    statusEl.textContent = 'Unable to load tenure mix data.';
+                    statusEl.classList.add('status-error');
+                }
+            });
+        };
+
+        advancedToggle.addEventListener('click', () => {
+        const expanded = advancedToggle.getAttribute('aria-expanded') === 'true';
+        const nextExpanded = !expanded;
+        advancedToggle.setAttribute('aria-expanded', String(nextExpanded));
+        advancedToggle.textContent = nextExpanded ? 'Hide labor charts' : 'More labor charts';
+        advancedPanel.classList.toggle('hidden', !nextExpanded);
+        advancedPanel.setAttribute('aria-hidden', String(!nextExpanded));
+        captureAnalyticsEvent('historical_labor_advanced_toggled', {
+            source: 'historical_advanced_toggle',
+            expanded: nextExpanded
+        });
+        if (nextExpanded) renderAdvancedHistoricalCharts();
+        });
+    } catch (err) {
+        console.error('Historical charts failed to render', err);
+    }
 }
 
 // ==========================================
@@ -1677,7 +2875,7 @@ function runSearchLegacy(baseKeys = null, transitionSet = null, searchStartedAt 
     }
 
     const term = state.filters.text.toLowerCase();
-    const roleFilter = state.filters.role.toLowerCase();
+    const roleFilter = normalizeText(state.filters.role);
     const { minSalary, maxSalary, sort, dataFlagsOnly, exclusionsMode, transition } = state.filters;
     const localTransitionSet = transitionSet || (transition && state.transitionMemberIndex ? state.transitionMemberIndex[`${transition.year}|${transition.direction}`] : null);
 
@@ -1711,7 +2909,9 @@ function runSearchLegacy(baseKeys = null, transitionSet = null, searchStartedAt 
         if (exclusionsMode !== 'off') {
             if (!person._wasExcluded) return false;
             if (exclusionsMode === 'recent') {
-                const cutoff = Date.now() - (365 * 24 * 60 * 60 * 1000);
+                const nowTs = Date.now();
+                const utcDayKey = Math.floor(nowTs / DAY_MS);
+                const cutoff = (utcDayKey - 365) * DAY_MS;
                 let ts = null;
                 if (person._exclusionDate) {
                     ts = new Date(person._exclusionDate).getTime();
@@ -1757,7 +2957,7 @@ function runSearchLegacy(baseKeys = null, transitionSet = null, searchStartedAt 
     });
 }
 
-function runSearch() {
+function runSearch(allowRecovery = true) {
     // If user asked for recent exclusions but transition map not ready, compute then rerun.
     if (state.filters.exclusionsMode === 'recent' && !state.exclusionTransitionsReady) {
         computeExclusionTransitions().then(() => runSearch());
@@ -1769,20 +2969,47 @@ function runSearch() {
     const transitionSet = transitionKey && state.transitionMemberIndex ? state.transitionMemberIndex[transitionKey] : null;
     const baseKeys = getBaseKeys();
     const searchStartedAt = Date.now();
+    const token = ++state.searchRunToken;
 
     updateSearchUrl();
 
     if (!state.searchWorker || !state.searchWorkerReady || state.searchWorkerErrored) {
+        if (allowRecovery) {
+            recoverSearchWorker('worker_unavailable').then((recovered) => {
+                if (token !== state.searchRunToken) return;
+                if (recovered) {
+                    runSearch(false);
+                    return;
+                }
+                hideAutocomplete();
+                runSearchLegacy(baseKeys, transitionSet, searchStartedAt);
+                updateRegexPill(false, '');
+            });
+            return;
+        }
         hideAutocomplete();
         runSearchLegacy(baseKeys, transitionSet, searchStartedAt);
         updateRegexPill(false, '');
         return;
     }
 
-    const token = ++state.searchRunToken;
     sendSearchToWorker(buildWorkerPayload(baseKeys, transitionSet))
         .then(payload => {
             if (token !== state.searchRunToken) return;
+            if ((payload.warning || '') === 'Search worker not ready.' && allowRecovery) {
+                state.searchWorkerReady = false;
+                recoverSearchWorker('worker_not_ready_result').then((recovered) => {
+                    if (token !== state.searchRunToken) return;
+                    if (recovered) {
+                        runSearch(false);
+                        return;
+                    }
+                    hideAutocomplete();
+                    runSearchLegacy(baseKeys, transitionSet, searchStartedAt);
+                    updateRegexPill(false, '');
+                });
+                return;
+            }
             const names = (payload.names || []).filter(name => !!state.masterData[name]);
             state.lastSearchSuggestions = payload.suggestions || [];
             state.lastHighlightTerms = payload.highlightTerms || [];
@@ -1795,13 +3022,55 @@ function runSearch() {
                 latencyMs: Date.now() - searchStartedAt
             });
         })
-        .catch(() => {
+        .catch((err) => {
             if (token !== state.searchRunToken) return;
             state.searchWorkerErrored = true;
+            if (allowRecovery) {
+                recoverSearchWorker(err && err.code === 'WORKER_TIMEOUT' ? 'worker_timeout' : 'worker_error').then((recovered) => {
+                    if (token !== state.searchRunToken) return;
+                    if (recovered) {
+                        runSearch(false);
+                        return;
+                    }
+                    hideAutocomplete();
+                    runSearchLegacy(baseKeys, transitionSet, searchStartedAt);
+                    updateRegexPill(false, '');
+                });
+                return;
+            }
             hideAutocomplete();
             runSearchLegacy(baseKeys, transitionSet, searchStartedAt);
             updateRegexPill(false, '');
         });
+}
+
+function checkSearchWorkerHealth(trigger = 'unknown') {
+    if (!state.masterKeys.length || !state.keyBuckets || !state.keyBuckets.all) return;
+    const now = Date.now();
+    if ((now - state.lastWorkerHealthCheckTs) < WORKER_HEALTH_CHECK_MIN_INTERVAL_MS) {
+        return;
+    }
+    state.lastWorkerHealthCheckTs = now;
+
+    if (!state.searchWorker || state.searchWorkerErrored || state.searchWorkerInitInFlight) {
+        recoverSearchWorker(`resume_${trigger}`).then((recovered) => {
+            if (recovered) runSearch(false);
+        });
+        return;
+    }
+
+    pingSearchWorker().then((ready) => {
+        if (ready) return;
+        state.searchWorkerReady = false;
+        recoverSearchWorker(`ping_failed_${trigger}`).then((recovered) => {
+            if (recovered) runSearch(false);
+        });
+    }).catch(() => {
+        state.searchWorkerReady = false;
+        recoverSearchWorker(`ping_error_${trigger}`).then((recovered) => {
+            if (recovered) runSearch(false);
+        });
+    });
 }
 
 function updateSearchSuggestions() {
@@ -2629,9 +3898,18 @@ function isTypingTarget(target) {
 
 function setupTooltips() {
     const tooltipEl = document.getElementById('custom-tooltip');
+    const showTooltipFor = (target) => {
+        if (!target || !tooltipEl) return;
+        tooltipEl.textContent = target.getAttribute('data-tooltip');
+        tooltipEl.classList.remove('hidden');
+    };
+    const hideTooltip = () => {
+        if (!tooltipEl) return;
+        tooltipEl.classList.add('hidden');
+    };
     document.addEventListener('mouseover', (e) => {
         const target = e.target.closest('[data-tooltip]');
-        if (target) { tooltipEl.textContent = target.getAttribute('data-tooltip'); tooltipEl.classList.remove('hidden'); }
+        if (target) showTooltipFor(target);
     });
     document.addEventListener('mousemove', (e) => {
         if (!tooltipEl.classList.contains('hidden')) {
@@ -2639,7 +3917,14 @@ function setupTooltips() {
             tooltipEl.style.top = `${Math.min(e.clientY + 10, window.innerHeight - tooltipEl.offsetHeight - 20)}px`;
         }
     });
-    document.addEventListener('mouseout', (e) => { if (e.target.closest('[data-tooltip]')) tooltipEl.classList.add('hidden'); });
+    document.addEventListener('mouseout', (e) => { if (e.target.closest('[data-tooltip]')) hideTooltip(); });
+    document.addEventListener('focusin', (e) => {
+        const target = e.target.closest('[data-tooltip]');
+        if (target) showTooltipFor(target);
+    });
+    document.addEventListener('focusout', (e) => {
+        if (e.target.closest('[data-tooltip]')) hideTooltip();
+    });
 }
 
 function setupAdvancedSearchToggle() {
@@ -2780,6 +4065,20 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.setAttribute('aria-expanded', (!expanded).toString());
         body.classList.toggle('hidden', expanded);
     });
+});
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        checkSearchWorkerHealth('visibilitychange');
+    }
+});
+
+window.addEventListener('pageshow', () => {
+    checkSearchWorkerHealth('pageshow');
+});
+
+window.addEventListener('focus', () => {
+    checkSearchWorkerHealth('focus');
 });
 
 function parseUrlParams() {
