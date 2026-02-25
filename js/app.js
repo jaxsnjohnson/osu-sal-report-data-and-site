@@ -876,6 +876,7 @@ const els = {
     exclusionsMode: document.getElementById('exclusions-mode'),
     suggestedSearches: document.getElementById('suggested-searches'),
     results: document.getElementById('results'),
+    scrollSentinel: null,
     stats: document.getElementById('stats-bar'),
     roleDatalist: document.getElementById('role-list'),
     dashboard: document.getElementById('stats-dashboard'),
@@ -3542,9 +3543,11 @@ function renderInitial() {
                 <div class="no-results-actions">${formerBtn}${suggestionBtns}</div>
             </div>
         `;
+        els.scrollSentinel = null;
         return;
     }
     els.results.innerHTML = keys.map((name, idx) => generateCardHTML(name, idx)).join('') + getSentinel();
+    els.scrollSentinel = els.results.lastElementChild;
     observeSentinel();
 }
 
@@ -3565,8 +3568,9 @@ function appendNextBatch() {
     const endIdx = Math.min(startIdx + state.batchSize, state.filteredKeys.length);
     if (startIdx >= state.filteredKeys.length) return;
     const html = state.filteredKeys.slice(startIdx, endIdx).map((name, idx) => generateCardHTML(name, startIdx + idx)).join('');
-    document.getElementById('scroll-sentinel')?.remove();
+    els.scrollSentinel?.remove();
     els.results.insertAdjacentHTML('beforeend', html + getSentinel());
+    els.scrollSentinel = els.results.lastElementChild;
     state.visibleCount = endIdx;
     captureAnalyticsEvent('results_batch_loaded', {
         source: 'infinite_scroll',
@@ -3775,7 +3779,14 @@ function setupInfiniteScroll() {
         entries.forEach(entry => { if (entry.isIntersecting && state.visibleCount < state.filteredKeys.length) appendNextBatch(); });
     }, { root: null, rootMargin: '100px', threshold: 0.1 });
 }
-function observeSentinel() { const s = document.getElementById('scroll-sentinel'); if (s && observer) observer.observe(s); }
+function observeSentinel() {
+    let s = els.scrollSentinel;
+    if (!s) {
+        s = document.getElementById('scroll-sentinel');
+        els.scrollSentinel = s;
+    }
+    if (s && observer) observer.observe(s);
+}
 
 function debounce(func, wait) { let timeout; return function(...args) { clearTimeout(timeout); timeout = setTimeout(() => func.apply(this, args), wait); }; }
 const handleSearch = debounce(() => {
