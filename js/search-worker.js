@@ -90,10 +90,28 @@ const buildOrgAliases = (orgValue) => {
     const aliases = [];
     const base = normalizeText(text);
     if (base) aliases.push(base);
-    const parts = text.split('-').map(p => p.trim()).filter(Boolean);
-    if (parts.length) {
-        const code = normalizeText(parts[0]);
-        const tail = normalizeText(parts.slice(1).join(' '));
+
+    if (text.indexOf('-') === -1) return Array.from(new Set(aliases.filter(Boolean)));
+
+    let firstPart = '';
+    let tailJoined = '';
+    let nonEmptyCount = 0;
+    let start = 0;
+
+    for (let i = 0; i <= text.length; i++) {
+        if (i !== text.length && text.charCodeAt(i) !== 45) continue;
+        const part = text.slice(start, i).trim();
+        if (part) {
+            if (nonEmptyCount === 0) firstPart = part;
+            else tailJoined += (tailJoined ? ' ' : '') + part;
+            nonEmptyCount++;
+        }
+        start = i + 1;
+    }
+
+    if (nonEmptyCount) {
+        const code = normalizeText(firstPart);
+        const tail = normalizeText(tailJoined);
         if (code) aliases.push(code);
         if (tail) {
             aliases.push(tail);
