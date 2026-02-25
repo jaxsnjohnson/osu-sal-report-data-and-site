@@ -108,10 +108,9 @@ const calculateSnapshotPay = (snapshot) => {
     if (!snapshot || !snapshot.Jobs) return 0;
     let total = 0;
     snapshot.Jobs.forEach(job => {
-        // Optimized: Use pre-parsed _rate if available, else parseFloat directly
-        const rate = job._rate !== undefined ? job._rate : (parseFloat(job['Annual Salary Rate']) || 0);
-        // Optimized: Use pre-parsed _pct if available
-        const pct = job._pct !== undefined ? job._pct : (parseFloat(job['Appt Percent']) || 0);
+        // Cache parsed fallback values so repeated pay calculations avoid reparsing.
+        const rate = job._rate ?? (job._rate = (parseFloat(job['Annual Salary Rate']) || 0));
+        const pct = job._pct ?? (job._pct = (parseFloat(job['Appt Percent']) || 0));
 
         if (rate > 0) total += rate * (pct / 100);
     });
@@ -212,7 +211,7 @@ const hydratePersonDetail = (person) => {
     const lastJob = (lastSnap.Jobs && lastSnap.Jobs.length > 0) ? lastSnap.Jobs[0] : {};
     person._lastSnapshot = lastSnap;
     person._lastJob = lastJob;
-    person._totalPay = lastSnap._pay || calculateSnapshotPay(lastSnap);
+    person._totalPay = lastSnap._pay !== undefined ? lastSnap._pay : calculateSnapshotPay(lastSnap);
     person._payMissing = (lastSnap.Jobs || []).some(j => j._missingRate);
     person._lastDate = lastSnap.Date;
     person._isUnclass = (lastSnap.Source || "").toLowerCase().includes('unclass');
