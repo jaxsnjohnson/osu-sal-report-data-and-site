@@ -1,14 +1,19 @@
 let records = [];
 let recordMap = new Map();
 let isReady = false;
+let regexPrefilterEnabled = true;
+let regexSearchAux = null;
 
 const resultCache = new Map();
 const CACHE_LIMIT = 80;
 const REGEX_MAX_MATCHES = 3000;
+const REGEX_PREFILTER_MIN_LITERAL_LEN = 3;
+const REGEX_PREFILTER_BROAD_CANDIDATE_RATIO = 0.98;
 const SUGGESTION_LIMIT = 8;
 const DAY_MS = 24 * 60 * 60 * 1000;
 let editDistancePrev = new Uint32Array(0);
 let editDistanceCur = new Uint32Array(0);
+const EMPTY_UINT32 = new Uint32Array(0);
 
 const normalizeText = (value) => (value || '').toString().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const tokenize = (value) => {
@@ -42,6 +47,201 @@ const tokenizeLongUnique = (value) => {
     return out;
 };
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const collectUniqueTrigrams = (value) => {
+    const text = (value || '').toString();
+    if (text.length < 3) return [];
+    const seen = new Set();
+    const out = [];
+    for (let i = 0; i <= (text.length - 3); i++) {
+        const gram = text.slice(i, i + 3);
+        if (seen.has(gram)) continue;
+        seen.add(gram);
+        out.push(gram);
+    }
+    return out;
+};
+
+const intersectSortedIds = (a, b) => {
+    if (!a || !b || !a.length || !b.length) return EMPTY_UINT32;
+    const out = new Uint32Array(Math.min(a.length, b.length));
+    let i = 0;
+    let j = 0;
+    let count = 0;
+    while (i < a.length && j < b.length) {
+        const av = a[i];
+        const bv = b[j];
+        if (av === bv) {
+            out[count++] = av;
+            i++;
+            j++;
+            continue;
+        }
+        if (av < bv) i++;
+        else j++;
+    }
+    return count === out.length ? out : out.subarray(0, count);
+};
+
+const unionSortedIds = (a, b) => {
+    if (!a || !a.length) return b || EMPTY_UINT32;
+    if (!b || !b.length) return a;
+
+    const out = new Uint32Array(a.length + b.length);
+    let i = 0;
+    let j = 0;
+    let count = 0;
+    while (i < a.length && j < b.length) {
+        const av = a[i];
+        const bv = b[j];
+        if (av === bv) {
+            out[count++] = av;
+            i++;
+            j++;
+            continue;
+        }
+        if (av < bv) {
+            out[count++] = av;
+            i++;
+        } else {
+            out[count++] = bv;
+            j++;
+        }
+    }
+    while (i < a.length) out[count++] = a[i++];
+    while (j < b.length) out[count++] = b[j++];
+    return count === out.length ? out : out.subarray(0, count);
+};
+
+const intersectManyPostings = (postings) => {
+    if (!postings || !postings.length) return EMPTY_UINT32;
+    if (postings.length === 1) return postings[0];
+
+    const ordered = postings.slice().sort((a, b) => a.length - b.length);
+    let current = ordered[0];
+    for (let i = 1; i < ordered.length; i++) {
+        current = intersectSortedIds(current, ordered[i]);
+        if (!current.length) return EMPTY_UINT32;
+    }
+    return current;
+};
+
+const buildRegexSearchAux = (nextRecords) => {
+    const postingLists = new Map();
+    for (let idx = 0; idx < nextRecords.length; idx++) {
+        const rec = nextRecords[idx];
+        const grams = collectUniqueTrigrams(rec && rec.searchText ? rec.searchText : '');
+        for (const gram of grams) {
+            let ids = postingLists.get(gram);
+            if (!ids) {
+                ids = [];
+                postingLists.set(gram, ids);
+            }
+            ids.push(idx);
+        }
+    }
+
+    const gramPostings = new Map();
+    for (const [gram, ids] of postingLists.entries()) {
+        gramPostings.set(gram, Uint32Array.from(ids));
+    }
+
+    return {
+        recordsRef: nextRecords,
+        recordCount: nextRecords.length,
+        gramPostings
+    };
+};
+
+const ensureRegexSearchAux = () => {
+    if (!regexSearchAux || regexSearchAux.recordsRef !== records || regexSearchAux.recordCount !== records.length) {
+        regexSearchAux = buildRegexSearchAux(records);
+    }
+    return regexSearchAux;
+};
+
+const extractRegexLiteralBranches = (pattern) => {
+    if (!pattern) return null;
+
+    let body = pattern;
+    if (body.startsWith('^')) body = body.slice(1);
+    if (body.endsWith('$')) body = body.slice(0, -1);
+    if (!body) return null;
+
+    let alternationBody = body;
+    if (alternationBody.startsWith('(') || alternationBody.endsWith(')')) {
+        if (!(alternationBody.startsWith('(') && alternationBody.endsWith(')'))) return null;
+        alternationBody = alternationBody.slice(1, -1);
+        if (!alternationBody) return null;
+        if (alternationBody.includes('(') || alternationBody.includes(')')) return null;
+    }
+
+    const rawBranches = alternationBody.split('|');
+    if (!rawBranches.length) return null;
+
+    const literals = [];
+    const seen = new Set();
+    for (const branch of rawBranches) {
+        if (!branch) return null;
+        for (let i = 0; i < branch.length; i++) {
+            const ch = branch[i];
+            if (ch === '\\') return null;
+            if (ch === '.' || ch === '*' || ch === '+' || ch === '?' ||
+                ch === '[' || ch === ']' || ch === '{' || ch === '}') {
+                return null;
+            }
+        }
+
+        const literalNorm = normalizeText(branch);
+        if (!literalNorm || literalNorm.length < REGEX_PREFILTER_MIN_LITERAL_LEN) continue;
+        if (seen.has(literalNorm)) continue;
+        seen.add(literalNorm);
+        literals.push(literalNorm);
+    }
+
+    return literals.length ? literals : null;
+};
+
+const getRegexPrefilterCandidateIds = (parsed) => {
+    if (!regexPrefilterEnabled || !parsed || !parsed.regex || !records.length) return null;
+
+    const literals = extractRegexLiteralBranches(parsed.regex);
+    if (!literals || !literals.length) return null;
+
+    const aux = ensureRegexSearchAux();
+    if (!aux || !aux.gramPostings) return null;
+
+    let unionIds = null;
+    for (const literal of literals) {
+        const grams = collectUniqueTrigrams(literal);
+        if (!grams.length) return null;
+
+        const postings = [];
+        for (const gram of grams) {
+            const ids = aux.gramPostings.get(gram);
+            if (!ids || !ids.length) {
+                postings.length = 0;
+                break;
+            }
+            postings.push(ids);
+        }
+
+        let branchIds = EMPTY_UINT32;
+        if (postings.length) {
+            branchIds = intersectManyPostings(postings);
+        }
+
+        unionIds = unionIds ? unionSortedIds(unionIds, branchIds) : branchIds;
+        if (unionIds && unionIds.length >= (aux.recordCount * REGEX_PREFILTER_BROAD_CANDIDATE_RATIO)) {
+            return null;
+        }
+    }
+
+    return unionIds || EMPTY_UINT32;
+};
+
+const setRegexPrefilterEnabled = (value) => {
+    regexPrefilterEnabled = value !== false;
+};
 
 const boundedEditDistance = (a, b, maxDist) => {
     const alen = a.length;
@@ -555,10 +755,12 @@ const parseAndSearch = (payload) => {
 
     if (parsed.regex) {
         const regex = parsed.regexCompiled;
-        for (const rec of records) {
-            if (!appliesCommonFilters(rec, payloadWithSets, parsed, transitionSet, cutoffTs)) continue;
+        const candidateIds = getRegexPrefilterCandidateIds(parsed);
+        const searchRegexRecord = (rec) => {
+            if (!rec) return false;
+            if (!appliesCommonFilters(rec, payloadWithSets, parsed, transitionSet, cutoffTs)) return false;
             regex.lastIndex = 0;
-            if (!regex.test(rec.searchText)) continue;
+            if (!regex.test(rec.searchText)) return false;
             items.push({
                 name: rec.name,
                 score: 0,
@@ -569,7 +771,19 @@ const parseAndSearch = (payload) => {
             if (items.length > REGEX_MAX_MATCHES) {
                 regexTooBroad = true;
                 warning = 'Regex is too broad. Add anchors or more specific terms.';
-                break;
+                return true;
+            }
+            return false;
+        };
+
+        if (candidateIds !== null) {
+            for (let i = 0; i < candidateIds.length; i++) {
+                const rec = records[candidateIds[i]];
+                if (searchRegexRecord(rec)) break;
+            }
+        } else {
+            for (const rec of records) {
+                if (searchRegexRecord(rec)) break;
             }
         }
     } else {
@@ -736,6 +950,7 @@ const initWorker = async (id, payload) => {
         const data = await response.json();
         records = prepareRecords(data.records || []);
         recordMap = new Map(records.map(rec => [rec.name, rec]));
+        regexSearchAux = null;
         resultCache.clear();
         isReady = true;
         postMessage({ type: 'ready', id, count: records.length });
