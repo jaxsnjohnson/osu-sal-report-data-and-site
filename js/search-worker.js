@@ -650,14 +650,45 @@ const prepareRecords = (rawRecords) => rawRecords.map(rec => {
     const lastOrgNorm = normalizeText(rec.lastOrgNorm || rec.lastOrg || '');
     const rolesNorm = (rec.rolesNorm || []).map(normalizeText).filter(Boolean);
     const roles = rec.roles || [];
-    const orgAliasesRaw = (rec.orgAliases && rec.orgAliases.length)
-        ? rec.orgAliases
-        : [...buildOrgAliases(rec.homeOrg), ...buildOrgAliases(rec.lastOrg)];
-    const orgAliases = Array.from(new Set(orgAliasesRaw.map(normalizeText).filter(Boolean)));
-    const roleAliasesRaw = (rec.roleAliases && rec.roleAliases.length)
-        ? rec.roleAliases
-        : roles.flatMap(role => tokenize(role));
-    const roleAliases = Array.from(new Set(roleAliasesRaw.map(normalizeText).filter(Boolean)));
+    const orgAliases = [];
+    const orgAliasSeen = new Set();
+    if (rec.orgAliases && rec.orgAliases.length) {
+        for (const alias of rec.orgAliases) {
+            const norm = normalizeText(alias);
+            if (!norm || orgAliasSeen.has(norm)) continue;
+            orgAliasSeen.add(norm);
+            orgAliases.push(norm);
+        }
+    } else {
+        for (const alias of buildOrgAliases(rec.homeOrg)) {
+            if (orgAliasSeen.has(alias)) continue;
+            orgAliasSeen.add(alias);
+            orgAliases.push(alias);
+        }
+        for (const alias of buildOrgAliases(rec.lastOrg)) {
+            if (orgAliasSeen.has(alias)) continue;
+            orgAliasSeen.add(alias);
+            orgAliases.push(alias);
+        }
+    }
+    const roleAliases = [];
+    const roleAliasSeen = new Set();
+    if (rec.roleAliases && rec.roleAliases.length) {
+        for (const alias of rec.roleAliases) {
+            const norm = normalizeText(alias);
+            if (!norm || roleAliasSeen.has(norm)) continue;
+            roleAliasSeen.add(norm);
+            roleAliases.push(norm);
+        }
+    } else {
+        for (const role of roles) {
+            for (const token of tokenize(role)) {
+                if (roleAliasSeen.has(token)) continue;
+                roleAliasSeen.add(token);
+                roleAliases.push(token);
+            }
+        }
+    }
     const exclusionTs = rec.exclusionDate ? new Date(rec.exclusionDate).getTime() : 0;
     const nameNorm = normalizeText(rec.nameNorm || rec.name || '');
     const roleSearch = normalizeText((roles || []).join(' ') + ' ' + roleAliases.join(' '));
