@@ -86,6 +86,8 @@ const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const normalizeText = (value) => (value || '').toString().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 let editDistancePrev = new Uint32Array(0);
 let editDistanceCur = new Uint32Array(0);
+let editDistanceExactPrev = new Uint32Array(0);
+let editDistanceExactCur = new Uint32Array(0);
 
 const highlightText = (text, terms) => {
     const raw = (text || '').toString();
@@ -344,6 +346,144 @@ const boundedEditDistance = (a, b, maxDist) => {
     return prev[blen];
 };
 
+const editDistanceExact = (a, b) => {
+    const alen = a.length;
+    const blen = b.length;
+
+    const rowSize = blen + 1;
+    if (editDistanceExactPrev.length < rowSize) {
+        editDistanceExactPrev = new Uint32Array(rowSize);
+        editDistanceExactCur = new Uint32Array(rowSize);
+    }
+
+    let prev = editDistanceExactPrev;
+    let cur = editDistanceExactCur;
+    for (let j = 0; j <= blen; j++) prev[j] = j;
+
+    for (let i = 1; i <= alen; i++) {
+        cur[0] = i;
+        for (let j = 1; j <= blen; j++) {
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+        }
+        const swap = prev;
+        prev = cur;
+        cur = swap;
+    }
+    return prev[blen];
+};
+
+const insertSuggestionBkTree = (root, term) => {
+    if (!term) return root;
+    if (!root) return { term, children: new Map() };
+
+    let node = root;
+    while (node) {
+        const dist = editDistanceExact(term, node.term);
+        const next = node.children.get(dist);
+        if (next) {
+            node = next;
+            continue;
+        }
+        node.children.set(dist, { term, children: new Map() });
+        break;
+    }
+    return root;
+};
+
+const searchSuggestionBkTree = (root, query, maxDist, out) => {
+    if (!root) return out;
+
+    const stack = [root];
+    while (stack.length) {
+        const node = stack.pop();
+        const dist = editDistanceExact(query, node.term);
+        if (dist <= maxDist) out.push(node.term);
+
+        const minEdge = dist - maxDist;
+        const maxEdge = dist + maxDist;
+        node.children.forEach((child, edgeDist) => {
+            if (edgeDist >= minEdge && edgeDist <= maxEdge) {
+                stack.push(child);
+            }
+        });
+    }
+    return out;
+};
+
+const markSearchSuggestionCandidate = (marks, list, itemIndex, excludeStart, excludeEnd) => {
+    if (excludeStart !== -1 && itemIndex >= excludeStart && itemIndex < excludeEnd) return;
+    if (marks[itemIndex]) return;
+    marks[itemIndex] = 1;
+    list.push(itemIndex);
+};
+
+const resetSearchSuggestionCandidates = (marks, list) => {
+    for (let i = 0; i < list.length; i++) {
+        marks[list[i]] = 0;
+    }
+    list.length = 0;
+};
+
+const buildSearchSuggestionAux = (index) => {
+    const trigramBuckets = new Map();
+    const tokenBuckets = new Map();
+
+    for (let i = 0; i < index.length; i++) {
+        const item = index[i];
+        if (!item) continue;
+
+        const key = item.key || '';
+        if (key.length >= 3) {
+            const seenTrigrams = new Set();
+            for (let j = 0; j <= key.length - 3; j++) {
+                const trigram = key.slice(j, j + 3);
+                if (seenTrigrams.has(trigram)) continue;
+                seenTrigrams.add(trigram);
+                let refs = trigramBuckets.get(trigram);
+                if (!refs) {
+                    refs = [];
+                    trigramBuckets.set(trigram, refs);
+                }
+                refs.push(i);
+            }
+        }
+
+        const seenTokens = new Set();
+        for (const token of (item.tokens || [])) {
+            if (!token || token.length < 3) continue;
+            if (seenTokens.has(token)) continue;
+            seenTokens.add(token);
+            let refs = tokenBuckets.get(token);
+            if (!refs) {
+                refs = [];
+                tokenBuckets.set(token, refs);
+            }
+            refs.push(i);
+        }
+    }
+
+    let fuzzyTokenBkTree = null;
+    tokenBuckets.forEach((_, token) => {
+        fuzzyTokenBkTree = insertSuggestionBkTree(fuzzyTokenBkTree, token);
+    });
+
+    const toTypedMap = (src) => {
+        const out = new Map();
+        src.forEach((refs, key) => {
+            out.set(key, Uint32Array.from(refs));
+        });
+        return out;
+    };
+
+    return {
+        keyTrigramToItems: toTypedMap(trigramBuckets),
+        tokenToItems: toTypedMap(tokenBuckets),
+        fuzzyTokenBkTree,
+        itemCount: index.length
+    };
+};
+
 const findPrefixRange = (index, prefix) => {
     let low = 0;
     let high = index.length - 1;
@@ -405,7 +545,7 @@ const getSearchSuggestions = (term, limit = 6) => {
     }
 
     // 2. Substring & Fuzzy matches (Score 1 & 2+)
-    // Iterate everything OUTSIDE the prefix range
+    // Fallback path scans everything OUTSIDE the prefix range.
     const searchRest = (startIndex, endIndex) => {
         for (let i = startIndex; i < endIndex; i++) {
             const item = state.searchIndex[i];
@@ -428,11 +568,78 @@ const getSearchSuggestions = (term, limit = 6) => {
         }
     };
 
-    if (start === -1) {
-        searchRest(0, state.searchIndex.length);
-    } else {
-        searchRest(0, start);
-        searchRest(prefixEnd, state.searchIndex.length);
+    const aux = state.searchSuggestionAux;
+    const marks = state.searchSuggestionCandidateMarks;
+    const candidateList = state.searchSuggestionCandidateList;
+    const canUseAux = !!(
+        aux &&
+        aux.itemCount === state.searchIndex.length &&
+        aux.keyTrigramToItems instanceof Map &&
+        aux.tokenToItems instanceof Map &&
+        marks &&
+        marks.length >= state.searchIndex.length &&
+        Array.isArray(candidateList)
+    );
+
+    let usedAux = false;
+    if (canUseAux) {
+        const excludeStart = start;
+        const excludeEnd = start === -1 ? -1 : prefixEnd;
+        const scoredStart = scored.length;
+        try {
+            const keyRefs = aux.keyTrigramToItems.get(query.slice(0, 3));
+            if (keyRefs) {
+                for (let i = 0; i < keyRefs.length; i++) {
+                    markSearchSuggestionCandidate(marks, candidateList, keyRefs[i], excludeStart, excludeEnd);
+                }
+            }
+
+            const fuzzyTokens = [];
+            searchSuggestionBkTree(aux.fuzzyTokenBkTree, query, maxDist, fuzzyTokens);
+            for (let i = 0; i < fuzzyTokens.length; i++) {
+                const tokenRefs = aux.tokenToItems.get(fuzzyTokens[i]);
+                if (!tokenRefs) continue;
+                for (let j = 0; j < tokenRefs.length; j++) {
+                    markSearchSuggestionCandidate(marks, candidateList, tokenRefs[j], excludeStart, excludeEnd);
+                }
+            }
+
+            candidateList.sort((a, b) => a - b);
+            for (let i = 0; i < candidateList.length; i++) {
+                const idx = candidateList[i];
+                const item = state.searchIndex[idx];
+                const key = item.key;
+                let score = null;
+
+                if (key.includes(query)) {
+                    score = 1;
+                } else {
+                    let bestDist = maxDist + 1;
+                    for (const token of item.tokens) {
+                        if (token.length < 3) continue;
+                        const dist = boundedEditDistance(query, token, maxDist);
+                        if (dist < bestDist) bestDist = dist;
+                        if (bestDist === 0) break;
+                    }
+                    if (bestDist <= maxDist) score = 2 + bestDist;
+                }
+                if (score !== null) scored.push({ score, value: item.value, type: item.type });
+            }
+            usedAux = true;
+        } catch (err) {
+            scored.length = scoredStart;
+        } finally {
+            resetSearchSuggestionCandidates(marks, candidateList);
+        }
+    }
+
+    if (!usedAux) {
+        if (start === -1) {
+            searchRest(0, state.searchIndex.length);
+        } else {
+            searchRest(0, start);
+            searchRest(prefixEnd, state.searchIndex.length);
+        }
     }
 
     scored.sort((a, b) => (a.score - b.score) || (a.value.length - b.value.length));
@@ -802,6 +1009,9 @@ const state = {
     bucketCache: {},
     bucketPromises: {},
     searchIndex: [],
+    searchSuggestionAux: null,
+    searchSuggestionCandidateMarks: null,
+    searchSuggestionCandidateList: [],
     focusIndex: -1,
     historicalChartsRendered: false,
     exclusionTransitionMap: {},
@@ -1078,6 +1288,15 @@ Promise.all([
         const roles = aggregates.allRoles || [];
         els.roleDatalist.innerHTML = roles.map(r => `<option value="${r}">`).join('');
         state.searchIndex = buildSearchIndex(state.masterKeys, roles);
+        try {
+            state.searchSuggestionAux = buildSearchSuggestionAux(state.searchIndex);
+            state.searchSuggestionCandidateMarks = new Uint8Array(state.searchSuggestionAux.itemCount || 0);
+            state.searchSuggestionCandidateList = [];
+        } catch (err) {
+            state.searchSuggestionAux = null;
+            state.searchSuggestionCandidateMarks = null;
+            state.searchSuggestionCandidateList = [];
+        }
         initSearchWorker();
 
         renderSuggestedSearches();
