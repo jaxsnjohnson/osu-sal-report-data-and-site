@@ -943,49 +943,94 @@ function hexToRgba(hex, alpha = 1) {
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-const getPersonTrendHTML = (timeline, chartId) => {
-    if (!timeline || timeline.length === 0) return '';
+const buildPersonTrendContent = (timeline, chartId) => {
+    if (!timeline || timeline.length === 0) return null;
+
     const yearsDiff = getTimelineYears(timeline);
     if (yearsDiff < MIN_TREND_YEARS) {
-        return `
-            <div class="trend-empty">
-                ⚠️ History covers less than ${MIN_TREND_YEARS} years. Trend chart available for longer tenures only.
-            </div>
-        `;
+        const empty = document.createElement('div');
+        empty.className = 'trend-empty';
+        empty.textContent = `⚠️ History covers less than ${MIN_TREND_YEARS} years. Trend chart available for longer tenures only.`;
+        return empty;
     }
+
+    const fragment = document.createDocumentFragment();
     const inflationReady = hasInflationData();
-    const inflationTooltip = inflationReady ? '' : 'Inflation data not loaded yet.';
-    const inflationSelect = inflationReady
-        ? `
-            <select class="trend-mode" data-chart-id="${chartId}" data-ready="true">
-                <option value="off" selected>Inflation: Off</option>
-                <option value="adjusted">Inflation: Adjusted (graph wide)</option>
-                <option value="compare">Inflation: Adjusted (separate line)</option>
-            </select>
-        `
-        : `
-            <select class="trend-mode" data-chart-id="${chartId}" disabled data-tooltip="${inflationTooltip}">
-                <option value="off" selected>Inflation: Off (data missing)</option>
-            </select>
-        `;
-    return `
-        <div class="trend-header">
-            <div class="stat-label">Total Compensation Trend</div>
-            <div class="trend-controls">
-                ${inflationSelect}
-                <label class="trend-toggle">
-                    <input type="checkbox" class="gap-toggle-input" data-chart-id="${chartId}">
-                    Missing data
-                </label>
-            </div>
-        </div>
-        <div class="person-chart-wrap">
-            <canvas id="${chartId}" data-person-chart="true" role="img" aria-label="Total compensation trend"></canvas>
-            <div class="trend-legend hidden">
-                <span class="legend-item"><span class="legend-line missing"></span> Missing data</span>
-            </div>
-        </div>
-    `;
+
+    const trendHeader = document.createElement('div');
+    trendHeader.className = 'trend-header';
+
+    const statLabel = document.createElement('div');
+    statLabel.className = 'stat-label';
+    statLabel.textContent = 'Total Compensation Trend';
+    trendHeader.appendChild(statLabel);
+
+    const trendControls = document.createElement('div');
+    trendControls.className = 'trend-controls';
+
+    const inflationSelect = document.createElement('select');
+    inflationSelect.className = 'trend-mode';
+    inflationSelect.dataset.chartId = chartId;
+
+    const addSelectOption = (value, text, selected = false) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = text;
+        if (selected) option.selected = true;
+        inflationSelect.appendChild(option);
+    };
+
+    if (inflationReady) {
+        inflationSelect.dataset.ready = 'true';
+        addSelectOption('off', 'Inflation: Off', true);
+        addSelectOption('adjusted', 'Inflation: Adjusted (graph wide)');
+        addSelectOption('compare', 'Inflation: Adjusted (separate line)');
+    } else {
+        inflationSelect.disabled = true;
+        inflationSelect.dataset.tooltip = 'Inflation data not loaded yet.';
+        addSelectOption('off', 'Inflation: Off (data missing)', true);
+    }
+    trendControls.appendChild(inflationSelect);
+
+    const trendToggle = document.createElement('label');
+    trendToggle.className = 'trend-toggle';
+
+    const gapToggleInput = document.createElement('input');
+    gapToggleInput.type = 'checkbox';
+    gapToggleInput.className = 'gap-toggle-input';
+    gapToggleInput.dataset.chartId = chartId;
+    trendToggle.appendChild(gapToggleInput);
+    trendToggle.appendChild(document.createTextNode(' Missing data'));
+    trendControls.appendChild(trendToggle);
+
+    trendHeader.appendChild(trendControls);
+    fragment.appendChild(trendHeader);
+
+    const chartWrap = document.createElement('div');
+    chartWrap.className = 'person-chart-wrap';
+
+    const canvas = document.createElement('canvas');
+    canvas.id = chartId;
+    canvas.dataset.personChart = 'true';
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', 'Total compensation trend');
+    chartWrap.appendChild(canvas);
+
+    const trendLegend = document.createElement('div');
+    trendLegend.className = 'trend-legend hidden';
+
+    const legendItem = document.createElement('span');
+    legendItem.className = 'legend-item';
+    const legendLine = document.createElement('span');
+    legendLine.className = 'legend-line missing';
+    legendItem.appendChild(legendLine);
+    legendItem.appendChild(document.createTextNode(' Missing data'));
+    trendLegend.appendChild(legendItem);
+
+    chartWrap.appendChild(trendLegend);
+    fragment.appendChild(chartWrap);
+
+    return fragment;
 };
 
 // ==========================================
@@ -3638,9 +3683,7 @@ function buildHistoryHTML(person, chartId, name) {
             </div>
             ${dataQualityHTML}
 
-            <div class="personal-trend-section">
-                ${getPersonTrendHTML(person.Timeline, chartId)}
-            </div>
+            <div class="personal-trend-section" data-chart-id="${chartId}"></div>
 
             <div class="collapsible-section trend-insights-section" data-chart-insights="${chartId}">
                 <button class="section-toggle" type="button" aria-expanded="false">Key Insights</button>
@@ -3795,6 +3838,11 @@ function loadAndRenderPersonDetails(cardEl) {
             }
             const chartId = cardEl.dataset.chartId;
             historyEl.innerHTML = buildHistoryHTML(person, chartId, name);
+            const trendSection = historyEl.querySelector('.personal-trend-section');
+            if (trendSection) {
+                const trendContent = buildPersonTrendContent(person.Timeline, chartId);
+                if (trendContent) trendSection.appendChild(trendContent);
+            }
             historyEl.dataset.loaded = 'true';
             if (hasInflationData()) refreshInflationControls();
             return person;
