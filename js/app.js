@@ -3201,6 +3201,80 @@ function updateSearchUrl() {
 // ==========================================
 // STATISTICS & DASHBOARD
 // ==========================================
+function medianOfThreeIndex(arr, a, b, c) {
+    const av = arr[a];
+    const bv = arr[b];
+    const cv = arr[c];
+    if (av < bv) {
+        if (bv < cv) return b;
+        return av < cv ? c : a;
+    }
+    if (av < cv) return a;
+    return bv < cv ? c : b;
+}
+
+function partitionRange(arr, left, right, pivotIndex) {
+    const pivotValue = arr[pivotIndex];
+    [arr[pivotIndex], arr[right]] = [arr[right], arr[pivotIndex]];
+
+    let ltEnd = left;
+    for (let i = left; i < right; i++) {
+        if (arr[i] < pivotValue) {
+            [arr[ltEnd], arr[i]] = [arr[i], arr[ltEnd]];
+            ltEnd++;
+        }
+    }
+
+    let eqEnd = ltEnd;
+    for (let i = ltEnd; i < right; i++) {
+        if (arr[i] === pivotValue) {
+            [arr[eqEnd], arr[i]] = [arr[i], arr[eqEnd]];
+            eqEnd++;
+        }
+    }
+
+    [arr[right], arr[eqEnd]] = [arr[eqEnd], arr[right]];
+    return [ltEnd, eqEnd];
+}
+
+function quickselectInPlace(arr, k) {
+    let left = 0;
+    let right = arr.length - 1;
+
+    while (left <= right) {
+        if (left === right) return arr[k];
+
+        const mid = left + ((right - left) >> 1);
+        const pivotIndex = medianOfThreeIndex(arr, left, mid, right);
+        const [eqStart, eqEnd] = partitionRange(arr, left, right, pivotIndex);
+
+        if (k < eqStart) {
+            right = eqStart - 1;
+        } else if (k > eqEnd) {
+            left = eqEnd + 1;
+        } else {
+            return arr[k];
+        }
+    }
+
+    return arr[k];
+}
+
+function medianFromUnsorted(values) {
+    const len = values.length;
+    if (len === 0) return 0;
+
+    const mid = Math.floor(len / 2);
+    const upper = quickselectInPlace(values, mid);
+    if (len % 2 !== 0) return upper;
+
+    let lower = values[0];
+    for (let i = 1; i < mid; i++) {
+        if (values[i] > lower) lower = values[i];
+    }
+    return (lower + upper) / 2;
+}
+
 function calculateStats(keys) {
     let count = 0, classified = 0, unclassified = 0, salaries = [];
     let orgs = {}, roles = {};
@@ -3239,12 +3313,7 @@ function calculateStats(keys) {
         }
     });
 
-    salaries.sort((a, b) => a - b);
-    let median = 0;
-    if (salaries.length > 0) {
-        const mid = Math.floor(salaries.length / 2);
-        median = salaries.length % 2 !== 0 ? salaries[mid] : (salaries[mid - 1] + salaries[mid]) / 2;
-    }
+    const median = medianFromUnsorted(salaries);
 
     return { 
         count, 
