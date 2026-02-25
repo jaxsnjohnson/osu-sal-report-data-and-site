@@ -17,6 +17,7 @@ _NON_NUMERIC_RE = re.compile(r"[^0-9.-]+")
 _ASCII_NON_NUMERIC_DELETE_MAP = {
     i: None for i in range(128) if chr(i) not in "0123456789.-"
 }
+_ASCII_LOWERCASE = string.ascii_lowercase
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 RAW_PATH = os.path.join(ROOT, "data.json")
@@ -120,7 +121,7 @@ def bucket_for_name(name):
     if not name:
         return "_"
     ch = name.strip()[0].lower()
-    if ch in string.ascii_lowercase:
+    if ch in _ASCII_LOWERCASE:
         return ch
     return "_"
 
