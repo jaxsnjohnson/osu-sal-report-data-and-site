@@ -84,6 +84,8 @@ const escapeHtml = (value) => {
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const normalizeText = (value) => (value || '').toString().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+let editDistancePrev = new Uint32Array(0);
+let editDistanceCur = new Uint32Array(0);
 
 const highlightText = (text, terms) => {
     const raw = (text || '').toString();
@@ -315,22 +317,30 @@ const boundedEditDistance = (a, b, maxDist) => {
     const alen = a.length;
     const blen = b.length;
     if (Math.abs(alen - blen) > maxDist) return maxDist + 1;
-    let prev = new Array(blen + 1);
+
+    const rowSize = blen + 1;
+    if (editDistancePrev.length < rowSize) {
+        editDistancePrev = new Uint32Array(rowSize);
+        editDistanceCur = new Uint32Array(rowSize);
+    }
+
+    let prev = editDistancePrev;
+    let cur = editDistanceCur;
     for (let j = 0; j <= blen; j++) prev[j] = j;
+
     for (let i = 1; i <= alen; i++) {
-        const cur = [i];
-        let rowMin = cur[0];
+        cur[0] = i;
+        let rowMin = i;
         for (let j = 1; j <= blen; j++) {
             const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-            cur[j] = Math.min(
-                prev[j] + 1,
-                cur[j - 1] + 1,
-                prev[j - 1] + cost
-            );
-            if (cur[j] < rowMin) rowMin = cur[j];
+            const next = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+            cur[j] = next;
+            if (next < rowMin) rowMin = next;
         }
         if (rowMin > maxDist) return maxDist + 1;
+        const swap = prev;
         prev = cur;
+        cur = swap;
     }
     return prev[blen];
 };
