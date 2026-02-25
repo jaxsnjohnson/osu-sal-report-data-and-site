@@ -337,7 +337,6 @@ def main():
 
     # Build peer medians + percentiles
     peer_median_map = {}
-    peer_percentiles = {}
     for date, bucket_map in peer_buckets.items():
         peer_median_map[date] = {}
         for key, values in bucket_map.items():
@@ -346,36 +345,27 @@ def main():
             peer_median_map[date][key] = median(values, presorted=True)
 
     # Compute per-person peer percentile (latest snapshot org+role)
-    for name, person in data.items():
-        timeline = person.get("Timeline", [])
-        if not timeline:
-            peer_percentiles[name] = None
+    for name, idx in index.items():
+        if not idx.get("_hasTimeline"):
+            idx["_peerPercentile"] = None
             continue
-        last_snap = timeline[-1]
-        jobs = last_snap.get("Jobs") or []
-        if not jobs:
-            peer_percentiles[name] = None
+        last_job = idx.get("_lastJob") or {}
+        if not last_job:
+            idx["_peerPercentile"] = None
             continue
-        primary_job = jobs[0]
-        org = primary_job.get("Job Orgn") or "Unknown"
-        role = primary_job.get("Job Title") or "Unknown"
+        org = last_job.get("Job Orgn") or "Unknown"
+        role = last_job.get("Job Title") or "Unknown"
         key = f"{org}||{role}"
-        date = last_snap.get("Date")
-        last_pay = calculate_snapshot_pay(last_snap)
+        date = idx.get("_lastDate")
+        last_pay = idx.get("_totalPay") or 0.0
         date_buckets = peer_buckets.get(date)
         bucket = date_buckets.get(key) if date_buckets else None
         if not bucket or len(bucket) <= 1 or last_pay <= 0:
-            peer_percentiles[name] = None
+            idx["_peerPercentile"] = None
             continue
         below = bisect_left(bucket, last_pay)
         equal = bisect_right(bucket, last_pay) - below
-        peer_percentiles[name] = ((below + 0.5 * equal) / len(bucket)) * 100.0
-
-    for name, pct in peer_percentiles.items():
-        if pct is not None:
-            index[name]["_peerPercentile"] = pct
-        else:
-            index[name]["_peerPercentile"] = None
+        idx["_peerPercentile"] = ((below + 0.5 * equal) / len(bucket)) * 100.0
 
     # COLA status (after snapshot dates are finalized)
     cola_pairs = build_cola_pairs(sorted(snapshot_dates), COLA_EVENTS)
