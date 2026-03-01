@@ -141,7 +141,14 @@ def main():
 
     all_roles = set()
     snapshot_dates = set()
-    stats_map = {}
+    stats_map = defaultdict(lambda: {
+        "date": "",
+        "classified": 0,
+        "unclassified": 0,
+        "payroll": 0.0,
+        "payrollClassified": 0.0,
+        "payrollUnclassified": 0.0,
+    })
     peer_buckets = defaultdict(lambda: defaultdict(list))
     class_transitions = {}
     search_index = []
@@ -213,22 +220,16 @@ def main():
 
             # stats + peer buckets
             if date:
-                if date not in stats_map:
-                    stats_map[date] = {
-                        "date": date,
-                        "classified": 0,
-                        "unclassified": 0,
-                        "payroll": 0.0,
-                        "payrollClassified": 0.0,
-                        "payrollUnclassified": 0.0,
-                    }
-                stats_map[date]["payroll"] += snap_pay
-                if "unclass" in src:
-                    stats_map[date]["unclassified"] += 1
-                    stats_map[date]["payrollUnclassified"] += snap_pay
+                entry = stats_map[date]
+                if not entry["date"]:
+                    entry["date"] = date
+                entry["payroll"] += snap_pay
+                if is_unclass:
+                    entry["unclassified"] += 1
+                    entry["payrollUnclassified"] += snap_pay
                 else:
-                    stats_map[date]["classified"] += 1
-                    stats_map[date]["payrollClassified"] += snap_pay
+                    entry["classified"] += 1
+                    entry["payrollClassified"] += snap_pay
 
                 primary_job = jobs[0] if jobs else None
                 if primary_job:
