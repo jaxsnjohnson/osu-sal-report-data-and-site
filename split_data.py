@@ -370,6 +370,20 @@ def main():
 
     # COLA status (after snapshot dates are finalized)
     cola_pairs = build_cola_pairs(sorted(snapshot_dates), COLA_EVENTS)
+    cola_eval_pairs = []
+    for event in cola_pairs:
+        before_date = event.get("beforeDate")
+        after_date = event.get("afterDate")
+        if not before_date or not after_date:
+            continue
+        if before_date == after_date:
+            continue
+        cola_eval_pairs.append((
+            before_date,
+            after_date,
+            event["pct"] - COLA_TOLERANCE_PCT,
+            event["label"],
+        ))
     for name in data.keys():
         idx = index.get(name)
         if not idx:
@@ -385,23 +399,17 @@ def main():
         cola_received = False
         cola_checked = 0
         cola_missed = []
-        for event in cola_pairs:
-            before_date = event.get("beforeDate")
-            after_date = event.get("afterDate")
-            if not before_date or not after_date:
-                continue
-            if before_date == after_date:
-                continue
+        for before_date, after_date, required_pct, label in cola_eval_pairs:
             before_pay = snap_by_date_pay.get(before_date, 0.0)
-            after_pay = snap_by_date_pay.get(after_date, 0.0)
             if before_pay <= 0:
                 continue
+            after_pay = snap_by_date_pay.get(after_date, 0.0)
             cola_checked += 1
             pct_change = ((after_pay - before_pay) / before_pay) * 100.0
-            if pct_change >= (event["pct"] - COLA_TOLERANCE_PCT):
+            if pct_change >= required_pct:
                 cola_received = True
             else:
-                cola_missed.append(event["label"])
+                cola_missed.append(label)
 
         idx["_colaReceived"] = cola_received
         idx["_colaChecked"] = cola_checked
