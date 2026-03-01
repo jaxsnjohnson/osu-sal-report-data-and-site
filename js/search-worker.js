@@ -51,14 +51,10 @@ const collectUniqueTrigrams = (value) => {
     const text = (value || '').toString();
     if (text.length < 3) return [];
     const seen = new Set();
-    const out = [];
     for (let i = 0; i <= (text.length - 3); i++) {
-        const gram = text.slice(i, i + 3);
-        if (seen.has(gram)) continue;
-        seen.add(gram);
-        out.push(gram);
+        seen.add(text.slice(i, i + 3));
     }
-    return out;
+    return Array.from(seen);
 };
 
 const intersectSortedIds = (a, b) => {
