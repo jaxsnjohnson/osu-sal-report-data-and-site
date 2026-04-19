@@ -89,18 +89,31 @@ let editDistanceCur = new Uint32Array(0);
 let editDistanceExactPrev = new Uint32Array(0);
 let editDistanceExactCur = new Uint32Array(0);
 
+let _lastHighlightTerms = null;
+let _lastHighlightRegex = null;
+
 const highlightText = (text, terms) => {
     const raw = (text || '').toString();
-    const safeTerms = (terms || [])
-        .map(t => (t || '').toString().trim())
-        .filter(Boolean)
-        .filter(t => t.length > 1)
-        .slice(0, 12);
-    if (!safeTerms.length) return escapeHtml(raw);
-    const pattern = safeTerms.map(escapeRegex).join('|');
-    if (!pattern) return escapeHtml(raw);
-    const regex = new RegExp(`(${pattern})`, 'ig');
-    return raw.split(regex).map((part, idx) => {
+    if (terms !== _lastHighlightTerms) {
+        _lastHighlightTerms = terms;
+        const safeTerms = (terms || [])
+            .map(t => (t || '').toString().trim())
+            .filter(Boolean)
+            .filter(t => t.length > 1)
+            .slice(0, 12);
+        if (!safeTerms.length) {
+            _lastHighlightRegex = null;
+        } else {
+            const pattern = safeTerms.map(escapeRegex).join('|');
+            if (!pattern) {
+                _lastHighlightRegex = null;
+            } else {
+                _lastHighlightRegex = new RegExp(`(${pattern})`, 'ig');
+            }
+        }
+    }
+    if (!_lastHighlightRegex) return escapeHtml(raw);
+    return raw.split(_lastHighlightRegex).map((part, idx) => {
         if (idx % 2 === 1) return `<mark class="search-hit">${escapeHtml(part)}</mark>`;
         return escapeHtml(part);
     }).join('');
