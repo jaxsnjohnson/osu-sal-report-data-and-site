@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import bisect
 import json
 import math
 import re
@@ -171,7 +172,7 @@ def build_index_lookup(index_path: Path) -> tuple[dict[str, list[dict[str, Any]]
             }
         )
 
-    keys = list(lookup.keys())
+    keys = sorted(lookup.keys())
     return lookup, keys
 
 
@@ -189,9 +190,16 @@ def find_name_match(
         return select_best_candidate(direct, target_key), "exact"
 
     prefix_candidates: list[dict[str, Any]] = []
-    for key in lookup_keys:
-        if key.startswith(target_key) or target_key.startswith(key):
-            prefix_candidates.extend(lookup[key])
+
+    idx = bisect.bisect_left(lookup_keys, target_key)
+    while idx < len(lookup_keys) and lookup_keys[idx].startswith(target_key):
+        prefix_candidates.extend(lookup[lookup_keys[idx]])
+        idx += 1
+
+    for i in range(1, len(target_key)):
+        prefix = target_key[:i]
+        if prefix in lookup:
+            prefix_candidates.extend(lookup[prefix])
 
     if prefix_candidates:
         return select_best_candidate(prefix_candidates, target_key), "prefix"
