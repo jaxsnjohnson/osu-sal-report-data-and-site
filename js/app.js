@@ -3724,10 +3724,17 @@ function buildHistoryHTML(person, chartId, name) {
                         <tbody>
                             ${reversedTimeline.map((snap, snapIdx) => {
                                 const prevSnap = reversedTimeline[snapIdx + 1];
+                                let prevJobsMap = null;
+                                if (prevSnap && prevSnap.Jobs) {
+                                    prevJobsMap = new Map();
+                                    for (const pj of prevSnap.Jobs) {
+                                        if (pj['Posn-Suff']) prevJobsMap.set(pj['Posn-Suff'], pj);
+                                    }
+                                }
                                 return (snap.Jobs || []).map(job => {
                                     let diffHTML = '';
-                                    if (prevSnap && prevSnap.Jobs && !job._missingRate) {
-                                        const prevJob = prevSnap.Jobs.find(j => j['Posn-Suff'] === job['Posn-Suff']);
+                                    if (prevJobsMap && !job._missingRate) {
+                                        const prevJob = prevJobsMap.get(job['Posn-Suff']);
                                         if (prevJob && !prevJob._missingRate) {
                                             // Optimization: Use pre-parsed _rate
                                             const currRate = job._rate !== undefined ? job._rate : cleanMoney(job['Annual Salary Rate']);
