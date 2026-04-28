@@ -63,12 +63,12 @@ def parse_shared_strings(archive: ZipFile) -> list[str]:
     root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
     shared_strings: list[str] = []
 
-    for si in root.findall("a:si", SPREADSHEET_NS):
+    for si in root.iterfind("a:si", SPREADSHEET_NS):
         parts: list[str] = []
         text_node = si.find("a:t", SPREADSHEET_NS)
         if text_node is not None and text_node.text:
             parts.append(text_node.text)
-        for run in si.findall("a:r", SPREADSHEET_NS):
+        for run in si.iterfind("a:r", SPREADSHEET_NS):
             run_text = run.find("a:t", SPREADSHEET_NS)
             if run_text is not None and run_text.text:
                 parts.append(run_text.text)
@@ -105,10 +105,10 @@ def read_workbook_rows(workbook_path: Path) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
 
     for row_index, row_node in enumerate(
-        worksheet.findall(".//a:sheetData/a:row", SPREADSHEET_NS), start=1
+        worksheet.iterfind(".//a:sheetData/a:row", SPREADSHEET_NS), start=1
     ):
         by_column: dict[str, str] = {}
-        for cell in row_node.findall("a:c", SPREADSHEET_NS):
+        for cell in row_node.iterfind("a:c", SPREADSHEET_NS):
             reference = cell.attrib.get("r", "")
             column_match = re.match(r"([A-Z]+)", reference)
             if not column_match:
