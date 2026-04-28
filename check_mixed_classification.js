@@ -24,14 +24,15 @@ async function main() {
         let hasClassified = false;
         let hasUnclassified = false;
 
-        person.Timeline.forEach(snap => {
+        for (const snap of person.Timeline) {
             const src = snap.Source.toLowerCase();
             if (src.includes('unclass')) {
                 hasUnclassified = true;
             } else if (src.includes('class')) {
                 hasClassified = true;
             }
-        });
+            if (hasClassified && hasUnclassified) break;
+        }
 
         if (hasClassified && hasUnclassified) {
             mixedCount++;
