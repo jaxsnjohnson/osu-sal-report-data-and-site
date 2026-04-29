@@ -138,6 +138,37 @@ const bucketForName = (name) => {
     return (ch >= 'a' && ch <= 'z') ? ch : '_';
 };
 
+const getUniqueBuckets = (keys) => {
+    const buckets = [];
+    let seen = 0; // bitmask for a-z (26 bits)
+    let hasUnderscore = false;
+
+    for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        if (!key) {
+            if (!hasUnderscore) { hasUnderscore = true; buckets.push('_'); }
+            continue;
+        }
+
+        let ch = key.charCodeAt(0);
+        if (ch <= 32) ch = key.trim().charCodeAt(0);
+        if (ch >= 65 && ch <= 90) ch += 32; // to lowercase
+
+        if (ch >= 97 && ch <= 122) {
+            const bit = 1 << (ch - 97);
+            if ((seen & bit) === 0) {
+                seen |= bit;
+                buckets.push(String.fromCharCode(ch));
+                if (seen === 0x3FFFFFF && hasUnderscore) return buckets;
+            }
+        } else {
+            if (!hasUnderscore) { hasUnderscore = true; buckets.push('_'); }
+            if (seen === 0x3FFFFFF && hasUnderscore) return buckets;
+        }
+    }
+    return buckets;
+};
+
 const getBucketUrl = (bucket) => `${DATA_BUCKET_DIR}/${bucket}.json`;
 
 const loadBucket = (bucket) => {
@@ -1439,7 +1470,7 @@ function loadUpperMiddleManagementMetrics() {
         byDate[date] = { date, upper: 0, total: 0, payrollUpper: 0, payrollTotal: 0 };
     });
 
-    const buckets = [...new Set(state.masterKeys.map(bucketForName))];
+    const buckets = getUniqueBuckets(state.masterKeys);
     state.upperMiddleMetricsPromise = forEachWithConcurrency(buckets, 6, (bucket) => {
         return loadBucket(bucket).then(bucketData => {
             Object.values(bucketData || {}).forEach(person => {
@@ -1502,7 +1533,7 @@ function loadPayDistributionMetrics() {
         byDate[date] = { classPays: [], unclassPays: [] };
     });
 
-    const buckets = [...new Set(state.masterKeys.map(bucketForName))];
+    const buckets = getUniqueBuckets(state.masterKeys);
     state.payDistributionMetricsPromise = forEachWithConcurrency(buckets, 6, (bucket) => {
         return loadBucket(bucket).then(bucketData => {
             Object.values(bucketData || {}).forEach(person => {
@@ -1595,7 +1626,7 @@ function loadTenureMixMetrics() {
     });
 
     const MS_PER_YEAR = 1000 * 60 * 60 * 24 * 365.25;
-    const buckets = [...new Set(state.masterKeys.map(bucketForName))];
+    const buckets = getUniqueBuckets(state.masterKeys);
 
     state.tenureMixMetricsPromise = forEachWithConcurrency(buckets, 6, (bucket) => {
         return loadBucket(bucket).then(bucketData => {
@@ -3965,7 +3996,7 @@ function computeTransitionMemberIndex() {
     if (state.transitionMemberIndex) return Promise.resolve(state.transitionMemberIndex);
     if (state.transitionIndexPromise) return state.transitionIndexPromise;
 
-    const buckets = [...new Set(state.masterKeys.map(bucketForName))];
+    const buckets = getUniqueBuckets(state.masterKeys);
     const index = {};
 
     const add = (year, direction, name) => {
