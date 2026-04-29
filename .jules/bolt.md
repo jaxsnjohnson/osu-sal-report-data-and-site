@@ -17,3 +17,7 @@
 ## 2026-02-05 - Intl.NumberFormat and Regex Instantiation Overhead
 **Learning:** `Intl.NumberFormat` instantiation and `RegExp` creation are surprisingly expensive operations. In frequently called utility functions like `formatMoney` or `cleanMoney`, repeatedly creating these objects caused significant CPU overhead, with 10,000 calls taking ~890ms.
 **Action:** Extract and cache `Intl.NumberFormat` instances and regular expressions (e.g., `MONEY_REGEX`) into module-scoped constants so they are instantiated only once, avoiding expensive repeated object creation. This reduces overhead dramatically (~13ms for 10,000 calls).
+
+## 2026-02-06 - Optimized calculateMovingAverage
+**Learning:** `calculateMovingAverage` was previously using a generic `Array` for its ring buffer which, despite being preallocated with `new Array(bufferSize)`, can be slower for purely numeric operations compared to `Float64Array`.
+**Action:** Replace `new Array(bufferSize)` with `new Float64Array(bufferSize)` for numeric ring buffers to improve performance and memory layout.
