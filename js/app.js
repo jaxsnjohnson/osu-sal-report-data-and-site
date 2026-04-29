@@ -171,6 +171,11 @@ const getUniqueBuckets = (keys) => {
 
 const getBucketUrl = (bucket) => `${DATA_BUCKET_DIR}/${bucket}.json`;
 
+// ⚡ Bolt Optimization: Cache Date parsing across dataset initialization
+// Timeline dates are repeated across thousands of records. Caching the parsed timestamp
+// avoids expensive new Date() calls in the hot path.
+const _globalDateTsCache = new Map();
+
 const loadBucket = (bucket) => {
     if (state.bucketCache[bucket]) return Promise.resolve(state.bucketCache[bucket]);
     if (state.bucketPromises[bucket]) return state.bucketPromises[bucket];
@@ -214,7 +219,6 @@ const hydratePersonDetail = (person) => {
 
     person._snapByDate = {};
     person.Timeline.sort((a, b) => (a.Date || "").localeCompare(b.Date || ""));
-    const dateTsCache = new Map();
 
     person.Timeline.forEach(snap => {
         if (snap.Date) person._snapByDate[snap.Date] = snap;
@@ -244,10 +248,11 @@ const hydratePersonDetail = (person) => {
 
         snap._pay = calculateSnapshotPay(snap);
         const dateStr = snap.Date;
-        let ts = dateTsCache.get(dateStr);
+        let ts = _globalDateTsCache.get(dateStr);
         if (ts === undefined) {
             ts = new Date(dateStr).getTime();
-            dateTsCache.set(dateStr, ts);
+            if (isNaN(ts)) ts = 0;
+            _globalDateTsCache.set(dateStr, ts);
         }
         snap._ts = ts;
     });
@@ -1360,13 +1365,21 @@ Promise.all([
             state.exclusionTransitionsReady = true;
         }
 
+        // ⚡ Bolt Optimization: Cache Date parsing for hire dates.
+        // Many employees share the same start date. A local map avoids redundant parsing.
+        const hiredCache = new Map();
         state.masterKeys.forEach(name => {
             const p = state.masterData[name];
             const hiredStr = p?.Meta?.['First Hired'];
             p._hiredDateTs = 0;
             if (hiredStr) {
-                const d = new Date(hiredStr);
-                if (!isNaN(d)) p._hiredDateTs = d.getTime();
+                let ts = hiredCache.get(hiredStr);
+                if (ts === undefined) {
+                    const d = new Date(hiredStr);
+                    ts = isNaN(d) ? 0 : d.getTime();
+                    hiredCache.set(hiredStr, ts);
+                }
+                p._hiredDateTs = ts;
             }
         });
 
