@@ -1,3 +1,18 @@
+const escapeHtmlAttr = (value) => {
+    if (value === null || value === undefined) return '';
+    return value.toString().replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+};
+
+const escapeHtml = (value) => {
+    if (value === null || value === undefined) return '';
+    return value.toString()
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+};
+
 document.addEventListener('DOMContentLoaded', () => {
     const listContainer = document.getElementById('records-list');
     const searchInput = document.getElementById('record-search');
@@ -112,20 +127,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         card.innerHTML = `
             <div class="meta-row">
-                <span>${record.date}</span>
-                <span>${record.quarter}</span>
+                <span>${escapeHtml(record.date)}</span>
+                <span>${escapeHtml(record.quarter)}</span>
             </div>
-            <h3 class="record-title">${title}</h3>
+            <h3 class="record-title">${escapeHtml(title)}</h3>
             <div class="record-meta">
-                <span class="tag ${typeClass}">${record.type}</span>
-                <span class="tag">Auth: ${record.author}</span>
-                <span class="tag">Source: ${record.source || 'Unknown'}</span>
+                <span class="tag ${escapeHtmlAttr(typeClass)}">${escapeHtml(record.type)}</span>
+                <span class="tag">Auth: ${escapeHtml(record.author)}</span>
+                <span class="tag">Source: ${escapeHtml(record.source || 'Unknown')}</span>
             </div>
-            <a href="reports/${record.filename}"
+            <a href="reports/${escapeHtmlAttr(record.filename)}"
                target="_blank"
                rel="noopener noreferrer"
                class="download-btn"
-               aria-label="Download ${title}">
+               aria-label="Download ${escapeHtmlAttr(title)}">
                 Download PDF ⬇
             </a>
         `;
