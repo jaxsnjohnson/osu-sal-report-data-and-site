@@ -2,24 +2,28 @@
 // UTILITIES
 // ==========================================
 
+const MONEY_REGEX = /[^0-9.-]+/g;
+const moneyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+const hourlyMoneyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 const formatMoney = (amount) => {
     if (!amount && amount !== 0) return '-';
-    const num = parseFloat(amount.toString().replace(/[^0-9.-]+/g, ''));
+    const num = parseFloat(amount.toString().replace(MONEY_REGEX, ''));
     if (isNaN(num)) return amount;
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(num);
+    return moneyFormatter.format(num);
 };
 
 const formatHourlyMoney = (amount) => {
     if (!amount && amount !== 0) return '-';
-    const num = parseFloat(amount.toString().replace(/[^0-9.-]+/g, ''));
+    const num = parseFloat(amount.toString().replace(MONEY_REGEX, ''));
     if (isNaN(num)) return amount;
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
+    return hourlyMoneyFormatter.format(num);
 };
 
 const cleanMoney = (val) => {
     if (!val) return 0;
     if (typeof val === 'number') return val;
-    const cleanStr = val.toString().replace(/[^0-9.-]+/g, '');
+    const cleanStr = val.toString().replace(MONEY_REGEX, '');
     return parseFloat(cleanStr) || 0;
 };
 
