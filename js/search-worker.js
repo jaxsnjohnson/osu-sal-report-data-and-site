@@ -15,7 +15,12 @@ let editDistancePrev = new Uint32Array(0);
 let editDistanceCur = new Uint32Array(0);
 const EMPTY_UINT32 = new Uint32Array(0);
 
-const normalizeText = (value) => (value || '').toString().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const QUERY_RE = /[^a-z0-9]+/g;
+const normalizeText = (value) => {
+    if (!value) return '';
+    QUERY_RE.lastIndex = 0;
+    return value.toString().toLowerCase().replace(QUERY_RE, ' ').trim();
+};
 const tokenize = (value) => {
     const text = (value || '').toString().toLowerCase();
     const tokens = [];
@@ -37,12 +42,35 @@ const tokenize = (value) => {
     return tokens;
 };
 const tokenizeLongUnique = (value) => {
+    const text = (value || '').toString().toLowerCase();
     const out = [];
     const seen = new Set();
-    for (const token of tokenize(value)) {
-        if (token.length < 3 || seen.has(token)) continue;
-        seen.add(token);
-        out.push(token);
+    let tokenStart = -1;
+
+    for (let i = 0; i < text.length; i++) {
+        const code = text.charCodeAt(i);
+        const isAlphaNum = (code >= 48 && code <= 57) || (code >= 97 && code <= 122);
+
+        if (isAlphaNum) {
+            if (tokenStart === -1) tokenStart = i;
+        } else if (tokenStart !== -1) {
+            if (i - tokenStart >= 3) {
+                const token = text.slice(tokenStart, i);
+                if (!seen.has(token)) {
+                    seen.add(token);
+                    out.push(token);
+                }
+            }
+            tokenStart = -1;
+        }
+    }
+
+    if (tokenStart !== -1 && text.length - tokenStart >= 3) {
+        const token = text.slice(tokenStart);
+        if (!seen.has(token)) {
+            seen.add(token);
+            out.push(token);
+        }
     }
     return out;
 };
@@ -855,10 +883,19 @@ const parseAndSearch = (payload) => {
     };
 };
 
-const prepareRecords = (rawRecords) => rawRecords.map(rec => {
+const prepareRecords = (rawRecords) => {
+    const out = new Array(rawRecords.length);
+    for (let i = 0; i < rawRecords.length; i++) {
+        const rec = rawRecords[i];
     const homeOrgNorm = normalizeText(rec.homeOrgNorm || rec.homeOrg || '');
     const lastOrgNorm = normalizeText(rec.lastOrgNorm || rec.lastOrg || '');
-    const rolesNorm = (rec.rolesNorm || []).map(normalizeText).filter(Boolean);
+
+        const recRolesNorm = rec.rolesNorm || [];
+        const rolesNorm = [];
+        for (let j = 0; j < recRolesNorm.length; j++) {
+            const norm = normalizeText(recRolesNorm[j]);
+            if (norm) rolesNorm.push(norm);
+        }
     const roles = rec.roles || [];
     const orgAliases = [];
     const orgAliasSeen = new Set();
@@ -904,11 +941,24 @@ const prepareRecords = (rawRecords) => rawRecords.map(rec => {
     const roleSearch = normalizeText((roles || []).join(' ') + ' ' + roleAliases.join(' '));
     const orgSearch = normalizeText(`${homeOrgNorm} ${lastOrgNorm} ${orgAliases.join(' ')}`);
     const searchText = normalizeText(rec.searchText || `${rec.name || ''} ${rec.homeOrg || ''} ${rec.lastOrg || ''} ${(roles || []).join(' ')}`);
-    const orgMatchValues = [homeOrgNorm, lastOrgNorm, ...orgAliases].filter(Boolean);
-    const roleMatchValues = [roleSearch, ...rolesNorm, ...roleAliases].filter(Boolean);
 
-    return {
-        name: rec.name,
+        const orgMatchValues = [];
+        if (homeOrgNorm) orgMatchValues.push(homeOrgNorm);
+        if (lastOrgNorm) orgMatchValues.push(lastOrgNorm);
+        for (let j = 0; j < orgAliases.length; j++) {
+            if (orgAliases[j]) orgMatchValues.push(orgAliases[j]);
+        }
+
+
+        const roleMatchValues = [];
+        if (roleSearch) roleMatchValues.push(roleSearch);
+        for (let j = 0; j < rolesNorm.length; j++) roleMatchValues.push(rolesNorm[j]);
+        for (let j = 0; j < roleAliases.length; j++) {
+            if (roleAliases[j]) roleMatchValues.push(roleAliases[j]);
+        }
+
+        out[i] = {
+            name: rec.name,
         nameNorm,
         nameTokens: tokenizeLongUnique(nameNorm),
         homeOrg: rec.homeOrg || '',
@@ -935,9 +985,11 @@ const prepareRecords = (rawRecords) => rawRecords.map(rec => {
         wasExcluded: !!rec.wasExcluded,
         exclusionTs: Number.isFinite(exclusionTs) ? exclusionTs : 0,
         searchText,
-        searchTextTokens: tokenizeLongUnique(searchText)
-    };
-});
+            searchTextTokens: tokenizeLongUnique(searchText)
+        };
+    }
+    return out;
+};
 
 const initWorker = async (id, payload) => {
     try {

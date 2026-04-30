@@ -21,3 +21,7 @@
 ## 2026-02-06 - Optimized calculateMovingAverage
 **Learning:** `calculateMovingAverage` was previously using a generic `Array` for its ring buffer which, despite being preallocated with `new Array(bufferSize)`, can be slower for purely numeric operations compared to `Float64Array`.
 **Action:** Replace `new Array(bufferSize)` with `new Float64Array(bufferSize)` for numeric ring buffers to improve performance and memory layout.
+
+## 2026-02-06 - Hot Loop Object Allocation (Search Worker)
+**Learning:** During initial data hydration (`prepareRecords`), utilizing high-level functional paradigms like `.map().filter()`, widespread `[...a, ...b]` spread operators, and recreating local regular expressions per-item significantly increases Garbage Collection (GC) overhead when processing ~20,000 objects. It was observed that these allocations compounded to over ~830ms.
+**Action:** When working on large initialization functions on the frontend: avoid the spread operator inside loops (use `.push()` instead); convert `.map()` to pre-allocated arrays `new Array(len)` and `for` loops; and hoist regular expressions to file scope (resetting `lastIndex` if they have the `/g` flag) to prevent recompilation.
