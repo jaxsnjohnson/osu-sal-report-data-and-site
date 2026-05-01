@@ -19,6 +19,7 @@ function cleanMoney(v) { return typeof v === 'number' ? v : parseFloat((v||"0").
 function formatMoney(v) { return "$" + (typeof v === 'number' ? v : cleanMoney(v)).toFixed(2); }
 function formatHourlyMoney(v) { return "$" + (typeof v === 'number' ? v : cleanMoney(v)).toFixed(2); }
 function getRecordGaps() { return []; }
+function escapeHtml(value) { return value ? value.toString() : ''; }
 
 const person = global.state.masterData["Test Person"];
 const numSnapshots = 50;
