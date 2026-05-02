@@ -16,6 +16,8 @@ global.state = {
 
 function formatDate(d) { return d; }
 function cleanMoney(v) { return typeof v === 'number' ? v : parseFloat((v||"0").replace(/[^0-9.-]+/g,"")) || 0; }
+function escapeHtml(v) { return v; }
+function escapeHtmlAttr(v) { return v; }
 function formatMoney(v) { return "$" + (typeof v === 'number' ? v : cleanMoney(v)).toFixed(2); }
 function formatHourlyMoney(v) { return "$" + (typeof v === 'number' ? v : cleanMoney(v)).toFixed(2); }
 function getRecordGaps() { return []; }
