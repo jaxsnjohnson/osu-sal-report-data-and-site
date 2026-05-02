@@ -1394,7 +1394,7 @@ Promise.all([
 
         // Populate Roles
         const roles = aggregates.allRoles || [];
-        els.roleDatalist.innerHTML = roles.map(r => `<option value="${r}">`).join('');
+        els.roleDatalist.innerHTML = roles.map(r => `<option value="${escapeHtmlAttr(r)}">`).join('');
         state.searchIndex = buildSearchIndex(state.masterKeys, roles);
         try {
             state.searchSuggestionAux = buildSearchSuggestionAux(state.searchIndex);
@@ -3675,7 +3675,7 @@ function updateDashboard(stats) {
 
     const maxCount = stats.topOrgs[0] ? stats.topOrgs[0][1] : 1;
     els.orgLeaderboard.innerHTML = stats.topOrgs.map(([name, count]) => `
-        <div class="lb-row"><div class="lb-label" data-tooltip="${name}">${name}</div>
+        <div class="lb-row"><div class="lb-label" data-tooltip="${escapeHtmlAttr(name)}">${escapeHtml(name)}</div>
         <div class="lb-bar-container"><div class="lb-bar" style="width: ${(count/maxCount)*100}%"></div><div class="lb-val">${count}</div></div></div>
     `).join('');
 
@@ -3697,7 +3697,7 @@ function updateDonut(roles, total) {
 
     els.roleDonut.style.background = `conic-gradient(${gradientParts.join(', ')})`;
     els.roleLegend.innerHTML = roles.map(([role, count], idx) => `
-        <div class="legend-item"><span class="dot" style="background:${colors[idx]}"></span> ${role} (${Math.round(count/total*100)}%)</div>
+        <div class="legend-item"><span class="dot" style="background:${colors[idx]}"></span> ${escapeHtml(role)} (${Math.round(count/total*100)}%)</div>
     `).join('') + (otherCount > 0 ? `<div class="legend-item"><span class="dot" style="background:${colors[4]}"></span> Other (${Math.round(otherCount/total*100)}%)</div>` : '');
 }
 
@@ -3804,9 +3804,9 @@ function buildHistoryHTML(person, chartId, name) {
                                     const salaryText = job._missingRate
                                         ? `<span class="missing-pay" data-tooltip="Report lists only the appointment term; no salary rate was provided.">Rate missing</span>${termBadge}`
                                         : `${formatMoney(job['Annual Salary Rate'])}${termBadge}`;
-                                    return `<tr><td class="date-cell"><div>${formatDate(snap.Date)}</div><div class="badge badge-source">${(snap.Source || '').substring(0, 15)}...</div></td>
-                                        <td><div style="font-weight:600;">${job['Job Title'] || ''}</div><div style="font-size:0.85rem; color:#64748b;">${job['Job Orgn'] || ''}</div></td>
-                                        <td><span class="badge badge-type">${job['Job Type'] || '?'}</span></td>
+                                    return `<tr><td class="date-cell"><div>${formatDate(snap.Date)}</div><div class="badge badge-source">${escapeHtml((snap.Source || '').substring(0, 15))}...</div></td>
+                                        <td><div style="font-weight:600;">${escapeHtml(job['Job Title'] || '')}</div><div style="font-size:0.85rem; color:#64748b;">${escapeHtml(job['Job Orgn'] || '')}</div></td>
+                                        <td><span class="badge badge-type">${escapeHtml(job['Job Type'] || '?')}</span></td>
                                         <td class="money-cell">${salaryText}${hourlyRateText}${diffHTML}</td></tr>`;
                                 }).join('')
                             }).join('')}
