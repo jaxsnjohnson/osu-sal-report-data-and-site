@@ -2448,14 +2448,24 @@ function renderInteractiveCharts(history) {
         loadUpperMiddleManagementMetrics()
             .then((upperMetrics) => {
                 const upperPoints = (upperMetrics && upperMetrics.points) ? upperMetrics.points : [];
-                const upperLabels = upperPoints.map(point => point.date);
-                const upperCount = upperPoints.map(point => point.upper);
-                const upperShare = upperPoints.map(point => point.headcountSharePct);
-                const upperPayrollShare = upperPoints.map(point => point.payrollSharePct);
-                const upperSpread = upperPoints.map(point => {
-                    if (point.payrollSharePct === null || point.headcountSharePct === null) return null;
-                    return point.payrollSharePct - point.headcountSharePct;
-                });
+                const upperLabels = [];
+                const upperCount = [];
+                const upperShare = [];
+                const upperPayrollShare = [];
+                const upperSpread = [];
+
+                for (let i = 0; i < upperPoints.length; i++) {
+                    const point = upperPoints[i];
+                    upperLabels.push(point.date);
+                    upperCount.push(point.upper);
+                    upperShare.push(point.headcountSharePct);
+                    upperPayrollShare.push(point.payrollSharePct);
+                    if (point.payrollSharePct === null || point.headcountSharePct === null) {
+                        upperSpread.push(null);
+                    } else {
+                        upperSpread.push(point.payrollSharePct - point.headcountSharePct);
+                    }
+                }
                 const statusEl = document.getElementById('upper-mgmt-status');
                 if (statusEl) statusEl.textContent = 'Upper-middle title trend from detailed per-snapshot role heuristics.';
 
