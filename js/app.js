@@ -3909,7 +3909,7 @@ function generateCardHTML(name, idx) {
         : '';
 
     return `
-    <div class="card" id="${cardId}" data-name="${attrName}" data-chart-id="${chartId}" style="${!isLatest ? 'opacity: 0.8;' : ''}">
+    <div class="card" id="${cardId}" data-name="${attrName}" data-index="${idx}" data-chart-id="${chartId}" style="${!isLatest ? 'opacity: 0.8;' : ''}">
         <div class="card-header" onclick="toggleCard('${cardId}')" onkeydown="handleCardKey(event, '${cardId}')" tabindex="0" role="button" aria-expanded="false" aria-controls="${historyId}">
             <div class="person-info">
                 <div class="name-header">
@@ -4159,7 +4159,8 @@ function toggleCard(id) {
     el.querySelector('.card-header')?.setAttribute('aria-expanded', expanded);
     if (expanded) {
         const name = el.getAttribute('data-name') || '';
-        const resultIndex = state.filteredKeys.indexOf(name);
+        const parsedIdx = parseInt(el.getAttribute('data-index'), 10);
+        const resultIndex = Number.isNaN(parsedIdx) ? -1 : parsedIdx;
         captureAnalyticsEvent('person_card_opened', {
             source: 'result_card',
             person_name: name,
