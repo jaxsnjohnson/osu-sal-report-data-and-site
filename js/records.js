@@ -30,6 +30,15 @@ document.addEventListener('DOMContentLoaded', () => {
         })
         .then(records => {
             allRecords = records;
+
+            // Pre-calculate search fields to avoid repetitive string operations in hot loop
+            for (let i = 0; i < allRecords.length; i++) {
+                const rec = allRecords[i];
+                rec._lowTitle = rec.title ? rec.title.toLowerCase() : '';
+                rec._lowType = rec.type ? rec.type.toLowerCase() : '';
+                rec._yearStr = rec.year ? rec.year.toString() : '';
+            }
+
             // Sort by date descending (newest first)
             allRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
             renderRecords();
@@ -73,13 +82,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Filter first
         const filtered = allRecords.filter(record => {
-            const matchesSearch = (
-                (record.title && record.title.toLowerCase().includes(searchTerm)) ||
-                (record.year && record.year.toString().includes(searchTerm)) ||
-                (record.type && record.type.toLowerCase().includes(searchTerm))
-            );
-            const matchesType = currentFilter === 'all' || record.type === currentFilter;
-            return matchesSearch && matchesType;
+            // Short-circuit: evaluate type first
+            if (currentFilter !== 'all' && record.type !== currentFilter) return false;
+
+            // Fast-path: if no search term, return true immediately
+            if (!searchTerm) return true;
+
+            return record._lowTitle.includes(searchTerm) ||
+                   record._yearStr.includes(searchTerm) ||
+                   record._lowType.includes(searchTerm);
         });
 
         if (filtered.length === 0) {
@@ -99,12 +110,14 @@ document.addEventListener('DOMContentLoaded', () => {
         // Get Years sorted descending
         const sortedYears = Object.keys(recordsByYear).sort((a, b) => b - a);
 
+        const fragment = document.createDocumentFragment();
+
         sortedYears.forEach(year => {
             // Create Header
             const yearHeader = document.createElement('h2');
             yearHeader.className = 'year-separator';
             yearHeader.textContent = year;
-            listContainer.appendChild(yearHeader);
+            fragment.appendChild(yearHeader);
 
             // Create Grid for this specific year
             const grid = document.createElement('div');
@@ -114,8 +127,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 grid.appendChild(createRecordCard(record));
             });
 
-            listContainer.appendChild(grid);
+            fragment.appendChild(grid);
         });
+
+        listContainer.appendChild(fragment);
     }
 
     function createRecordCard(record) {
