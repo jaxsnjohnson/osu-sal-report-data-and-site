@@ -3205,6 +3205,7 @@ function buildTrendInsights({
         return '<div class="insight-item">No insights available for this timeline.</div>';
     }
 
+    // TODO (Security): Escape 'text' using escapeHtml to prevent XSS
     return items.map(text => `<div class="insight-item">${text}</div>`).join('');
 }
 
@@ -3764,8 +3765,10 @@ function buildHistoryHTML(person, chartId, name) {
     }
 
     const reversedTimeline = person.Timeline.slice().reverse();
+    // TODO (Security): Escape 'snap.Date' using escapeHtml to prevent XSS
     const reportHistoryHTML = person.Timeline.map(snap => `<span class="badge badge-source" style="margin-right:4px; margin-bottom:4px;">${snap.Date}</span>`).join('');
     const recordGaps = getRecordGaps(person);
+    // TODO (Security): Escape values using escapeHtml to prevent XSS
     const recordGapHTML = recordGaps.length
         ? recordGaps.map(gap => `<div class="record-gap">No data between ${formatDate(gap.start)} and ${formatDate(gap.end)}</div>`).join('')
         : '';
@@ -3779,6 +3782,7 @@ function buildHistoryHTML(person, chartId, name) {
         dataFlags.push(`Possible COLA not received${labels}.`);
     }
     if (recordGaps.length) dataFlags.push(`Missing ${recordGaps.length} snapshot gap${recordGaps.length === 1 ? '' : 's'} in timeline.`);
+    // TODO (Security): Escape 'flag' using escapeHtml to prevent XSS
     const dataQualityHTML = dataFlags.length
         ? `<div class="data-quality"><strong>Data quality flags:</strong>${dataFlags.map(flag => `<div>${flag}</div>`).join('')}</div>`
         : '';
@@ -4041,7 +4045,7 @@ function getTransitionFilterLabel() {
 }
 function updateStats() {
     const transitionLabel = getTransitionFilterLabel();
-    const transitionText = transitionLabel ? ` (Transition filter: ${transitionLabel})` : '';
+    const transitionText = transitionLabel ? ` (Transition filter: ${escapeHtml(transitionLabel)})` : '';
     const warning = state.searchWarning ? ` ${escapeHtml(state.searchWarning)}` : '';
     els.stats.innerHTML = `Found ${state.filteredKeys.length} matching personnel records.${transitionText}${warning}`;
 }
