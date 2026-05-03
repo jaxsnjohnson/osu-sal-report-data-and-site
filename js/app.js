@@ -1947,16 +1947,32 @@ function renderInteractiveCharts(history) {
             : `${formatMoney(kpis.payGapDollar)} (${kpis.payGapRatio ? `${kpis.payGapRatio.toFixed(2)}x` : 'n/a'})`;
 
         const latestDateLabel = kpis.latestDate ? formatDate(kpis.latestDate) : 'n/a';
-        const labels = points.map(point => point.date);
-        const classifiedHeadcounts = points.map(point => point.classified);
-        const unclassifiedHeadcounts = points.map(point => point.unclassified);
-        const totalHeadcounts = points.map(point => point.totalHeadcount);
-        const classifiedPayroll = points.map(point => point.payrollClassified);
-        const unclassifiedPayroll = points.map(point => point.payrollUnclassified);
-        const totalPayroll = points.map(point => point.payrollTotal);
-        const perCapitaClassified = points.map(point => point.perCapitaClassified);
-        const perCapitaUnclassified = points.map(point => point.perCapitaUnclassified);
-        const perCapitaAll = points.map(point => point.perCapitaAll);
+
+        const len = points.length;
+        const labels = new Array(len);
+        const classifiedHeadcounts = new Array(len);
+        const unclassifiedHeadcounts = new Array(len);
+        const totalHeadcounts = new Array(len);
+        const classifiedPayroll = new Array(len);
+        const unclassifiedPayroll = new Array(len);
+        const totalPayroll = new Array(len);
+        const perCapitaClassified = new Array(len);
+        const perCapitaUnclassified = new Array(len);
+        const perCapitaAll = new Array(len);
+
+        for (let i = 0; i < len; i++) {
+            const point = points[i];
+            labels[i] = point.date;
+            classifiedHeadcounts[i] = point.classified;
+            unclassifiedHeadcounts[i] = point.unclassified;
+            totalHeadcounts[i] = point.totalHeadcount;
+            classifiedPayroll[i] = point.payrollClassified;
+            unclassifiedPayroll[i] = point.payrollUnclassified;
+            totalPayroll[i] = point.payrollTotal;
+            perCapitaClassified[i] = point.perCapitaClassified;
+            perCapitaUnclassified[i] = point.perCapitaUnclassified;
+            perCapitaAll[i] = point.perCapitaAll;
+        }
 
         container.innerHTML = `
         <div class="historical-warning">
