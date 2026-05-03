@@ -2211,13 +2211,31 @@ function renderInteractiveCharts(history) {
         state.historicalAdvancedRendered = true;
 
         const transitionPoints = metrics.transitionPoints || [];
-        const transitionLabels = transitionPoints.map(point => String(point.year));
-        const transitionOut = transitionPoints.map(point => point.toUnclassified);
-        const transitionIn = transitionPoints.map(point => point.toClassified);
-        const transitionNet = transitionPoints.map(point => point.netToUnclassified);
-        const transitionRate = transitionPoints.map(point => point.transitionRatePer1000);
-        const payGapDollar = points.map(point => point.payGapDollar);
-        const payGapRatio = points.map(point => point.payGapRatio);
+        const transitionLen = transitionPoints.length;
+        const transitionLabels = new Array(transitionLen);
+        const transitionOut = new Array(transitionLen);
+        const transitionIn = new Array(transitionLen);
+        const transitionNet = new Array(transitionLen);
+        const transitionRate = new Array(transitionLen);
+
+        for (let i = 0; i < transitionLen; i++) {
+            const point = transitionPoints[i];
+            transitionLabels[i] = String(point.year);
+            transitionOut[i] = point.toUnclassified;
+            transitionIn[i] = point.toClassified;
+            transitionNet[i] = point.netToUnclassified;
+            transitionRate[i] = point.transitionRatePer1000;
+        }
+
+        const pointsLen = points.length;
+        const payGapDollar = new Array(pointsLen);
+        const payGapRatio = new Array(pointsLen);
+
+        for (let i = 0; i < pointsLen; i++) {
+            const point = points[i];
+            payGapDollar[i] = point.payGapDollar;
+            payGapRatio[i] = point.payGapRatio;
+        }
 
         advancedPanel.innerHTML = `
             <div class="historical-advanced-grid">
