@@ -2,6 +2,9 @@
 // UTILITIES
 // ==========================================
 
+let _globalSnapshotIdxMap = null;
+let _cachedSnapshotDatesRef = null;
+
 const MONEY_REGEX = /[^0-9.-]+/g;
 const moneyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 const hourlyMoneyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1805,12 +1808,28 @@ function buildHistoricalLaborMetrics(history, transitions) {
         return (part / total) * 100;
     };
 
-    const sortedHistory = (history || [])
-        .filter(Boolean)
-        .slice()
-        .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const historyLen = history ? history.length : 0;
+    const sortedHistory = new Array(historyLen);
+    let hCount = 0;
+    for (let i = 0; i < historyLen; i++) {
+        const item = history[i];
+        if (item) {
+            sortedHistory[hCount++] = item;
+        }
+    }
+    sortedHistory.length = hCount;
+    sortedHistory.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
-    const points = sortedHistory.map(item => {
+    const points = new Array(hCount);
+    const yearEndHeadcount = {};
+    const inflationAvailable = hasInflationData();
+
+    let baseComparable = null;
+    let baseClassified = null;
+    let baseUnclassified = null;
+
+    for (let i = 0; i < hCount; i++) {
+        const item = sortedHistory[i];
         const classified = Number(item.classified) || 0;
         const unclassified = Number(item.unclassified) || 0;
         const payrollClassified = Number(item.payrollClassified) || 0;
@@ -1827,9 +1846,12 @@ function buildHistoricalLaborMetrics(history, transitions) {
             ? safeDiv(perCapitaUnclassified, perCapitaClassified)
             : null;
 
-        return {
-            date: item.date || '',
-            year: toYear(item.date),
+        const dateStr = item.date || '';
+        const year = toYear(dateStr);
+
+        const point = {
+            date: dateStr,
+            year: year,
             classified,
             unclassified,
             totalHeadcount,
@@ -1844,64 +1866,67 @@ function buildHistoricalLaborMetrics(history, transitions) {
             payrollShareClassifiedPct: toPct(payrollClassified, payrollTotal),
             payrollShareUnclassifiedPct: toPct(payrollUnclassified, payrollTotal),
             payGapDollar,
-            payGapRatio
+            payGapRatio,
+            perCapitaClassifiedReal: null,
+            perCapitaUnclassifiedReal: null,
+            classifiedIndexedReal: null,
+            unclassifiedIndexedReal: null
         };
-    });
+        points[i] = point;
 
-    const inflationAvailable = hasInflationData();
+        if (year !== null) {
+            yearEndHeadcount[year] = totalHeadcount;
+        }
 
-    points.forEach(point => {
         point.perCapitaClassifiedReal = (point.perCapitaClassified !== null && point.perCapitaClassified > 0)
             ? (inflationAvailable ? adjustForInflation(point.perCapitaClassified, point.date) : point.perCapitaClassified)
             : null;
         point.perCapitaUnclassifiedReal = (point.perCapitaUnclassified !== null && point.perCapitaUnclassified > 0)
             ? (inflationAvailable ? adjustForInflation(point.perCapitaUnclassified, point.date) : point.perCapitaUnclassified)
             : null;
-    });
 
-    const baseComparable = points.find(point =>
-        point.perCapitaClassifiedReal !== null &&
-        point.perCapitaUnclassifiedReal !== null &&
-        point.perCapitaClassifiedReal > 0 &&
-        point.perCapitaUnclassifiedReal > 0
-    ) || null;
+        if (!baseComparable && point.perCapitaClassifiedReal !== null && point.perCapitaUnclassifiedReal !== null && point.perCapitaClassifiedReal > 0 && point.perCapitaUnclassifiedReal > 0) {
+            baseComparable = point;
+            baseClassified = point.perCapitaClassifiedReal;
+            baseUnclassified = point.perCapitaUnclassifiedReal;
+        }
+    }
 
-    const baseClassified = baseComparable ? baseComparable.perCapitaClassifiedReal : null;
-    const baseUnclassified = baseComparable ? baseComparable.perCapitaUnclassifiedReal : null;
+    for (let i = 0; i < hCount; i++) {
+        const point = points[i];
+        if (baseClassified && baseClassified > 0 && point.perCapitaClassifiedReal !== null) {
+            point.classifiedIndexedReal = (point.perCapitaClassifiedReal / baseClassified) * 100;
+        }
+        if (baseUnclassified && baseUnclassified > 0 && point.perCapitaUnclassifiedReal !== null) {
+            point.unclassifiedIndexedReal = (point.perCapitaUnclassifiedReal / baseUnclassified) * 100;
+        }
+    }
 
-    points.forEach(point => {
-        point.classifiedIndexedReal = (baseClassified && baseClassified > 0 && point.perCapitaClassifiedReal !== null)
-            ? (point.perCapitaClassifiedReal / baseClassified) * 100
-            : null;
-        point.unclassifiedIndexedReal = (baseUnclassified && baseUnclassified > 0 && point.perCapitaUnclassifiedReal !== null)
-            ? (point.perCapitaUnclassifiedReal / baseUnclassified) * 100
-            : null;
-    });
+    const tLen = transitions ? transitions.length : 0;
+    const transitionPoints = new Array(tLen);
+    let trCount = 0;
+    for (let i = 0; i < tLen; i++) {
+        const item = transitions[i];
+        if (!item) continue;
+        const year = Number.parseInt(item.year, 10);
+        if (Number.isNaN(year)) continue;
 
-    const yearEndHeadcount = {};
-    points.forEach(point => {
-        if (point.year !== null) yearEndHeadcount[point.year] = point.totalHeadcount;
-    });
+        const toUnclassified = Number(item.toUnclassified) || 0;
+        const toClassified = Number(item.toClassified) || 0;
+        const totalMoves = toUnclassified + toClassified;
+        const endingHeadcount = yearEndHeadcount[year] || 0;
 
-    const transitionPoints = (transitions || [])
-        .filter(Boolean)
-        .map(item => {
-            const year = Number.parseInt(item.year, 10);
-            const toUnclassified = Number(item.toUnclassified) || 0;
-            const toClassified = Number(item.toClassified) || 0;
-            const totalMoves = toUnclassified + toClassified;
-            const endingHeadcount = Number.isNaN(year) ? 0 : (yearEndHeadcount[year] || 0);
-            return {
-                year: Number.isNaN(year) ? null : year,
-                toUnclassified,
-                toClassified,
-                netToUnclassified: toUnclassified - toClassified,
-                yearEndHeadcount: endingHeadcount,
-                transitionRatePer1000: safeDiv(totalMoves * 1000, endingHeadcount)
-            };
-        })
-        .filter(item => item.year !== null)
-        .sort((a, b) => a.year - b.year);
+        transitionPoints[trCount++] = {
+            year: year,
+            toUnclassified,
+            toClassified,
+            netToUnclassified: toUnclassified - toClassified,
+            yearEndHeadcount: endingHeadcount,
+            transitionRatePer1000: safeDiv(totalMoves * 1000, endingHeadcount)
+        };
+    }
+    transitionPoints.length = trCount;
+    transitionPoints.sort((a, b) => a.year - b.year);
 
     const latest = points.length ? points[points.length - 1] : null;
     const kpis = {
@@ -2965,12 +2990,19 @@ function ensurePersonChart(cardEl) {
         return { label: event.label, beforeIdx, afterIdx };
     }).filter(Boolean) : [];
 
-    const globalIdxMap = new Map((state.snapshotDates || []).map((d, i) => [d, i]));
+    if (state.snapshotDates && _cachedSnapshotDatesRef !== state.snapshotDates) {
+        _globalSnapshotIdxMap = new Map();
+        for (let i = 0; i < state.snapshotDates.length; i++) {
+            _globalSnapshotIdxMap.set(state.snapshotDates[i], i);
+        }
+        _cachedSnapshotDatesRef = state.snapshotDates;
+    }
+
     const gapSegments = [];
-    if (showGaps) {
+    if (showGaps && _globalSnapshotIdxMap) {
         for (let i = 0; i < labels.length - 1; i++) {
-            const idxA = globalIdxMap.get(labels[i]);
-            const idxB = globalIdxMap.get(labels[i + 1]);
+            const idxA = _globalSnapshotIdxMap.get(labels[i]);
+            const idxB = _globalSnapshotIdxMap.get(labels[i + 1]);
             if (idxA === undefined || idxB === undefined) continue;
             if (idxB - idxA > 1) {
                 gapSegments.push({ leftIdx: i, rightIdx: i + 1, missingCount: idxB - idxA - 1 });
@@ -4195,13 +4227,32 @@ function rebuildPersonChart(cardEl) {
 function getRecordGaps(person) {
     if (!person || !person.Timeline || person.Timeline.length < 2) return [];
     if (!state.snapshotDates || state.snapshotDates.length < 2) return [];
-    const dates = person.Timeline.map(s => s.Date).filter(Boolean).sort();
-    const idxMap = new Map(state.snapshotDates.map((d, i) => [d, i]));
+
+    if (state.snapshotDates && _cachedSnapshotDatesRef !== state.snapshotDates) {
+        _globalSnapshotIdxMap = new Map();
+        for (let i = 0; i < state.snapshotDates.length; i++) {
+            _globalSnapshotIdxMap.set(state.snapshotDates[i], i);
+        }
+        _cachedSnapshotDatesRef = state.snapshotDates;
+    }
+
+    const tLen = person.Timeline.length;
+    const dates = new Array(tLen);
+    let dCount = 0;
+    for (let i = 0; i < tLen; i++) {
+        const d = person.Timeline[i].Date;
+        if (d) {
+            dates[dCount++] = d;
+        }
+    }
+    dates.length = dCount;
+    dates.sort();
+
     const gaps = [];
 
-    for (let i = 0; i < dates.length - 1; i++) {
-        const idxA = idxMap.get(dates[i]);
-        const idxB = idxMap.get(dates[i + 1]);
+    for (let i = 0; i < dCount - 1; i++) {
+        const idxA = _globalSnapshotIdxMap.get(dates[i]);
+        const idxB = _globalSnapshotIdxMap.get(dates[i + 1]);
         if (idxA === undefined || idxB === undefined) continue;
         if (idxB - idxA > 1) {
             const start = state.snapshotDates[idxA + 1];
