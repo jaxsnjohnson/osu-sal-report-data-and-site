@@ -63,11 +63,15 @@ You will need a Unix-like environment (Linux, macOS, or WSL) with the following 
     cd osu-sal-report-data-and-site
     ```
 
-2.  **Add PDF Reports:**
-    Place any new OSU salary report PDFs into the `reports/` directory.
+2.  **Add Source Reports:**
+    Place any new OSU salary report PDFs into the `reports/` directory. If OSU publishes the classified report as HTML, save a reproducible snapshot first:
+    ```bash
+    python3 scripts/fetch_classified_html.py
+    ```
+    The HTML snapshot will be written to `html_reports/YYYY-MM-DD-classified.html`.
 
 3.  **Process Data:**
-    Run the conversion script to parse PDFs and generate the chunked dataset (`data/index.json`, `data/aggregates.json`, and `data/people/*.json`):
+    Run the conversion script to parse PDFs plus saved classified HTML snapshots and generate the chunked dataset (`data/index.json`, `data/aggregates.json`, and `data/people/*.json`):
     ```bash
     chmod +x convert_data.sh
     ./convert_data.sh
