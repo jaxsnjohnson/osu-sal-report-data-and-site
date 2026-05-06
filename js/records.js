@@ -45,7 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
         })
         .catch(err => {
             console.error(err);
-            listContainer.innerHTML = `<div class="error">Error loading records: ${err.message}</div>`;
+            listContainer.innerHTML = `<div class="error">Error loading records: ${escapeHtml(err.message)}</div>`;
         });
 
     // 2. Event Listeners
