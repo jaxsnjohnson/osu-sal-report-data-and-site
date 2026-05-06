@@ -6,3 +6,7 @@
 **Vulnerability:** XSS via unescaped string interpolation of transition filters in `updateStats` template string assignment to `innerHTML`.
 **Learning:** Transition filter labels derived from user state were interpolated without escaping directly into the DOM inside `els.stats.innerHTML`.
 **Prevention:** Use the `escapeHtml` wrapper around all untrusted string interpolations before assigning to `innerHTML`.
+## 2026-05-05 - [High] Fix XSS Vulnerabilities in app.js history rendering
+**Vulnerability:** XSS via unescaped string interpolation in `buildHistoryHTML` template string assignment to `innerHTML`.
+**Learning:** Raw date and COLA label properties sourced from JSON were interpolated without escaping directly into the DOM (e.g., `snap.Date`, `_colaMissedLabels`, and gap start/end dates).
+**Prevention:** Use an `escapeHtml` wrapper around all untrusted string interpolations, including date formatting return values, before assigning to `innerHTML`.
