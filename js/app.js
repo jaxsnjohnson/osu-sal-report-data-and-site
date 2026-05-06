@@ -3237,8 +3237,7 @@ function buildTrendInsights({
         return '<div class="insight-item">No insights available for this timeline.</div>';
     }
 
-    // TODO (Security): Escape 'text' using escapeHtml to prevent XSS
-    return items.map(text => `<div class="insight-item">${text}</div>`).join('');
+    return items.map(text => `<div class="insight-item">${escapeHtml(text)}</div>`).join('');
 }
 
 // ==========================================
@@ -3797,12 +3796,10 @@ function buildHistoryHTML(person, chartId, name) {
     }
 
     const reversedTimeline = person.Timeline.slice().reverse();
-    // TODO (Security): Escape 'snap.Date' using escapeHtml to prevent XSS
-    const reportHistoryHTML = person.Timeline.map(snap => `<span class="badge badge-source" style="margin-right:4px; margin-bottom:4px;">${snap.Date}</span>`).join('');
+    const reportHistoryHTML = person.Timeline.map(snap => `<span class="badge badge-source" style="margin-right:4px; margin-bottom:4px;">${escapeHtml(snap.Date)}</span>`).join('');
     const recordGaps = getRecordGaps(person);
-    // TODO (Security): Escape values using escapeHtml to prevent XSS
     const recordGapHTML = recordGaps.length
-        ? recordGaps.map(gap => `<div class="record-gap">No data between ${formatDate(gap.start)} and ${formatDate(gap.end)}</div>`).join('')
+        ? recordGaps.map(gap => `<div class="record-gap">No data between ${escapeHtml(formatDate(gap.start))} and ${escapeHtml(formatDate(gap.end))}</div>`).join('')
         : '';
     const summary = name ? (state.masterData[name] || {}) : {};
     const dataFlags = [];
@@ -3814,9 +3811,8 @@ function buildHistoryHTML(person, chartId, name) {
         dataFlags.push(`Possible COLA not received${labels}.`);
     }
     if (recordGaps.length) dataFlags.push(`Missing ${recordGaps.length} snapshot gap${recordGaps.length === 1 ? '' : 's'} in timeline.`);
-    // TODO (Security): Escape 'flag' using escapeHtml to prevent XSS
     const dataQualityHTML = dataFlags.length
-        ? `<div class="data-quality"><strong>Data quality flags:</strong>${dataFlags.map(flag => `<div>${flag}</div>`).join('')}</div>`
+        ? `<div class="data-quality"><strong>Data quality flags:</strong>${dataFlags.map(flag => `<div>${escapeHtml(flag)}</div>`).join('')}</div>`
         : '';
 
     return `
@@ -3884,7 +3880,7 @@ function buildHistoryHTML(person, chartId, name) {
                                     const salaryText = job._missingRate
                                         ? `<span class="missing-pay" data-tooltip="Report lists only the appointment term; no salary rate was provided.">Rate missing</span>${termBadge}`
                                         : `${formatMoney(job['Annual Salary Rate'])}${termBadge}`;
-                                    return `<tr><td class="date-cell"><div>${formatDate(snap.Date)}</div><div class="badge badge-source">${escapeHtml((snap.Source || '').substring(0, 15))}...</div></td>
+                                    return `<tr><td class="date-cell"><div>${escapeHtml(formatDate(snap.Date))}</div><div class="badge badge-source">${escapeHtml((snap.Source || '').substring(0, 15))}...</div></td>
                                         <td><div style="font-weight:600;">${escapeHtml(job['Job Title'] || '')}</div><div style="font-size:0.85rem; color:#64748b;">${escapeHtml(job['Job Orgn'] || '')}</div></td>
                                         <td><span class="badge badge-type">${escapeHtml(job['Job Type'] || '?')}</span></td>
                                         <td class="money-cell">${salaryText}${hourlyRateText}${diffHTML}</td></tr>`;
