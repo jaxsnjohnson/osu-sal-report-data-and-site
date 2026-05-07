@@ -103,11 +103,16 @@ const highlightText = (text, terms) => {
     const raw = (text || '').toString();
     if (terms !== _lastHighlightTerms) {
         _lastHighlightTerms = terms;
-        const safeTerms = (terms || [])
-            .map(t => (t || '').toString().trim())
-            .filter(Boolean)
-            .filter(t => t.length > 1)
-            .slice(0, 12);
+        const safeTerms = [];
+        if (terms) {
+            for (let i = 0; i < terms.length; i++) {
+                if (safeTerms.length >= 12) break;
+                const t = (terms[i] || '').toString().trim();
+                if (t && t.length > 1) {
+                    safeTerms.push(t);
+                }
+            }
+        }
         if (!safeTerms.length) {
             _lastHighlightRegex = null;
         } else {
@@ -305,25 +310,27 @@ const getExclusionTransitionTs = (person) => {
 const computeExclusionTransitions = () => {
     if (state.exclusionTransitionsReady) return Promise.resolve();
 
-    const excludedKeys = state.masterKeys.filter(name => {
+    const tasks = [];
+    for (let i = 0; i < state.masterKeys.length; i++) {
+        const name = state.masterKeys[i];
         const p = state.masterData[name];
-        return p && p._wasExcluded;
-    });
-
-    const tasks = excludedKeys.map(name =>
-        loadPersonDetail(name).then(person => {
-            if (!person) return;
-            if (person._exclusionDate) {
-                const tsPre = new Date(person._exclusionDate).getTime();
-                if (!isNaN(tsPre)) {
-                    state.exclusionTransitionMap[name] = tsPre;
-                    return;
-                }
-            }
-            const ts = getExclusionTransitionTs(person);
-            if (ts) state.exclusionTransitionMap[name] = ts;
-        })
-    );
+        if (p && p._wasExcluded) {
+            tasks.push(
+                loadPersonDetail(name).then(person => {
+                    if (!person) return;
+                    if (person._exclusionDate) {
+                        const tsPre = new Date(person._exclusionDate).getTime();
+                        if (!isNaN(tsPre)) {
+                            state.exclusionTransitionMap[name] = tsPre;
+                            return;
+                        }
+                    }
+                    const ts = getExclusionTransitionTs(person);
+                    if (ts) state.exclusionTransitionMap[name] = ts;
+                })
+            );
+        }
+    }
 
     return Promise.all(tasks).then(() => {
         state.exclusionTransitionsReady = true;
@@ -361,7 +368,7 @@ const buildSearchIndex = (names, roles) => {
         const key = value.toLowerCase();
         if (seen.has(`${type}:${key}`)) return;
         seen.add(`${type}:${key}`);
-        const tokens = key.split(/[^a-z0-9]+/).filter(Boolean);
+        const tokens = key.match(/[a-z0-9]+/g) || [];
         index.push({ value, key, type, tokens });
     };
     names.forEach(name => addItem(name, 'name'));

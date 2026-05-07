@@ -315,7 +315,7 @@ const buildOrgAliases = (orgValue) => {
     const base = normalizeText(text);
     if (base) aliases.push(base);
 
-    if (text.indexOf('-') === -1) return Array.from(new Set(aliases.filter(Boolean)));
+    if (text.indexOf('-') === -1) return aliases;
 
     let firstPart = '';
     let tailJoined = '';
@@ -339,10 +339,12 @@ const buildOrgAliases = (orgValue) => {
         if (code) aliases.push(code);
         if (tail) {
             aliases.push(tail);
-            tail.split(' ').forEach(tok => aliases.push(tok));
+            tail.split(' ').forEach(tok => {
+                if (tok) aliases.push(tok);
+            });
         }
     }
-    return Array.from(new Set(aliases.filter(Boolean)));
+    return Array.from(new Set(aliases));
 };
 
 const tokenizeQuery = (query) => {
@@ -376,7 +378,7 @@ const splitFieldTerms = (value) => {
     const unwrapped = raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"')
         ? raw.slice(1, -1)
         : raw;
-    return tokenize(unwrapped).filter(Boolean);
+    return tokenize(unwrapped);
 };
 
 const parseQuery = (query) => {
@@ -428,15 +430,18 @@ const parseQuery = (query) => {
             if (!value) continue;
 
             if (field === 'name') {
-                parsed.nameTerms.push(...splitFieldTerms(value));
+                const parts = splitFieldTerms(value);
+                for (let j = 0; j < parts.length; j++) parsed.nameTerms.push(parts[j]);
                 continue;
             }
             if (field === 'org') {
-                parsed.orgTerms.push(...splitFieldTerms(value));
+                const parts = splitFieldTerms(value);
+                for (let j = 0; j < parts.length; j++) parsed.orgTerms.push(parts[j]);
                 continue;
             }
             if (field === 'role') {
-                parsed.roleTerms.push(...splitFieldTerms(value));
+                const parts = splitFieldTerms(value);
+                for (let j = 0; j < parts.length; j++) parsed.roleTerms.push(parts[j]);
                 continue;
             }
             if (field === 'type') {
