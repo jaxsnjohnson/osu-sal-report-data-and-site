@@ -1565,11 +1565,14 @@ function loadPayDistributionMetrics() {
     const buckets = getUniqueBuckets(state.masterKeys);
     state.payDistributionMetricsPromise = forEachWithConcurrency(buckets, 6, (bucket) => {
         return loadBucket(bucket).then(bucketData => {
-            Object.values(bucketData || {}).forEach(person => {
-                if (!person || !person.Timeline) return;
+            if (!bucketData) return;
+            for (const name in bucketData) {
+                const person = bucketData[name];
+                if (!person || !person.Timeline) continue;
                 hydratePersonDetail(person);
-                person.Timeline.forEach(snap => {
-                    if (!snap || !snap.Date || !byDate[snap.Date]) return;
+                for (let i = 0; i < person.Timeline.length; i++) {
+                    const snap = person.Timeline[i];
+                    if (!snap || !snap.Date || !byDate[snap.Date]) continue;
                     const pay = snap._pay !== undefined ? snap._pay : calculateSnapshotPay(snap);
                     const classState = getClassStateFromSource(snap.Source);
                     if (classState === 'unclassified') {
@@ -1577,8 +1580,8 @@ function loadPayDistributionMetrics() {
                     } else if (classState === 'classified') {
                         byDate[snap.Date].classPays.push(pay);
                     }
-                });
-            });
+                }
+            }
         });
     })
         .then(() => {
@@ -1659,17 +1662,20 @@ function loadTenureMixMetrics() {
 
     state.tenureMixMetricsPromise = forEachWithConcurrency(buckets, 6, (bucket) => {
         return loadBucket(bucket).then(bucketData => {
-            Object.values(bucketData || {}).forEach(person => {
-                if (!person || !person.Timeline) return;
+            if (!bucketData) return;
+            for (const name in bucketData) {
+                const person = bucketData[name];
+                if (!person || !person.Timeline) continue;
                 hydratePersonDetail(person);
                 const hiredTs = getPersonHireTs(person);
-                if (!hiredTs) return; // skip unknown hire dates
-                person.Timeline.forEach(snap => {
-                    if (!snap || !snap.Date || !byDate[snap.Date]) return;
+                if (!hiredTs) continue; // skip unknown hire dates
+                for (let i = 0; i < person.Timeline.length; i++) {
+                    const snap = person.Timeline[i];
+                    if (!snap || !snap.Date || !byDate[snap.Date]) continue;
                     const snapTs = parseDateToTs(snap.Date);
-                    if (Number.isNaN(snapTs) || snapTs <= 0) return;
+                    if (Number.isNaN(snapTs) || snapTs <= 0) continue;
                     const tenureYears = (snapTs - hiredTs) / MS_PER_YEAR;
-                    if (tenureYears < 0) return;
+                    if (tenureYears < 0) continue;
                     let band = 'lt3';
                     if (tenureYears >= 15) band = 'fifteenPlus';
                     else if (tenureYears >= 7) band = 'sevenTo15';
@@ -1684,8 +1690,8 @@ function loadTenureMixMetrics() {
                     bucketObj.total += 1;
                     byDate[snap.Date].overall.counts[band] += 1;
                     byDate[snap.Date].overall.total += 1;
-                });
-            });
+                }
+            }
         });
     })
         .then(() => {
@@ -4109,14 +4115,16 @@ function computeTransitionMemberIndex() {
     };
 
     const processBucketData = (bucketData) => {
-        Object.entries(bucketData).forEach(([name, person]) => {
-            if (!person || !person.Timeline || person.Timeline.length < 2) return;
+        for (const name in bucketData) {
+            const person = bucketData[name];
+            if (!person || !person.Timeline || person.Timeline.length < 2) continue;
             hydratePersonDetail(person);
 
             let prevState = null;
-            person.Timeline.forEach(snap => {
+            for (let i = 0; i < person.Timeline.length; i++) {
+                const snap = person.Timeline[i];
                 const currentState = getClassStateFromSource(snap.Source);
-                if (!currentState) return;
+                if (!currentState) continue;
                 if (prevState && prevState !== currentState) {
                     const year = new Date(snap.Date).getFullYear();
                     if (!isNaN(year)) {
@@ -4125,8 +4133,8 @@ function computeTransitionMemberIndex() {
                     }
                 }
                 prevState = currentState;
-            });
-        });
+            }
+        }
     };
 
     state.transitionIndexPromise = forEachWithConcurrency(
