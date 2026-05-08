@@ -35,3 +35,10 @@
 ## 2024-05-07 - Redundant Iterator Chains
 **Learning:** Functions like `splitFieldTerms` in `js/search-worker.js` were chaining `.filter(Boolean)` after returning from utilities like `tokenize` that already guaranteed no empty string elements, and spread operators (`...splitFieldTerms`) inside loops caused additional intermediate array allocations.
 **Action:** When a utility function already sanitizes its output, do not chain redundant iterators (`.filter`). In hot paths, use manual `for` loops instead of spread operators (`...array`) inside `.push()` to prevent unnecessary array reallocation and reduce garbage collection pressure.
+## 2026-05-18 - Avoid UI Chart Array Pre-allocation
+**Learning:** Manual array pre-allocation (`new Array(len)`) and loop merging for small UI chart datasets (like in `ensurePersonChart` or macro charts) degrades code readability without yielding any measurable performance gain.
+**Action:** Do not optimize small UI data array iterations by merging `.map` calls into verbose `for` loops. Reserve array pre-allocation and loop merging for massive, high-frequency data processing loops.
+
+## 2026-05-18 - Optimize Analytics Loops Iteration
+**Learning:** Using `Object.values().forEach()`, `Object.entries().forEach()`, or `Array.prototype.forEach()` in heavy analytics processing over large datasets (e.g., iterating through multiple buckets of employee timelines) incurs significant garbage collection overhead due to intermediate array allocations and callback function overhead.
+**Action:** Always replace `Object.values().forEach()` and `Object.entries().forEach()` with native `for...in` loops, and `Array.prototype.forEach()` with native `for` loops in hot path analytics data processing to reduce GC pressure and callback overhead. Use `continue` instead of `return` when converting `forEach` to `for` loops.
