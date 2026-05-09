@@ -100,19 +100,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Group by Year
         const recordsByYear = {};
-        filtered.forEach(record => {
+        for (let i = 0; i < filtered.length; i++) {
+            const record = filtered[i];
             if (!recordsByYear[record.year]) {
                 recordsByYear[record.year] = [];
             }
             recordsByYear[record.year].push(record);
-        });
+        }
 
         // Get Years sorted descending
         const sortedYears = Object.keys(recordsByYear).sort((a, b) => b - a);
 
         const fragment = document.createDocumentFragment();
 
-        sortedYears.forEach(year => {
+        for (let i = 0; i < sortedYears.length; i++) {
+            const year = sortedYears[i];
             // Create Header
             const yearHeader = document.createElement('h2');
             yearHeader.className = 'year-separator';
@@ -123,12 +125,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const grid = document.createElement('div');
             grid.className = 'records-grid';
             
-            recordsByYear[year].forEach(record => {
-                grid.appendChild(createRecordCard(record));
-            });
+            const records = recordsByYear[year];
+            for (let j = 0; j < records.length; j++) {
+                grid.appendChild(createRecordCard(records[j]));
+            }
 
             fragment.appendChild(grid);
-        });
+        }
 
         listContainer.appendChild(fragment);
     }

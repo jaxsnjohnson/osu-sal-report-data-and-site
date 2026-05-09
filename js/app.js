@@ -232,10 +232,12 @@ const hydratePersonDetail = (person) => {
     person._snapByDate = {};
     person.Timeline.sort((a, b) => (a.Date || "").localeCompare(b.Date || ""));
 
-    person.Timeline.forEach(snap => {
+    for (let i = 0; i < person.Timeline.length; i++) {
+        const snap = person.Timeline[i];
         if (snap.Date) person._snapByDate[snap.Date] = snap;
         if (snap.Jobs) {
-            snap.Jobs.forEach(job => {
+            for (let j = 0; j < snap.Jobs.length; j++) {
+                const job = snap.Jobs[j];
                 const rawRate = job['Annual Salary Rate'];
                 const rateNum = parseFloat(rawRate);
                 const term = (job['Salary Term'] || '').trim();
@@ -255,7 +257,7 @@ const hydratePersonDetail = (person) => {
                     job._pct = parseFloat(job['Appt Percent']);
                     if (isNaN(job._pct)) job._pct = 0;
                 }
-            });
+            }
         }
 
         snap._pay = calculateSnapshotPay(snap);
@@ -267,7 +269,7 @@ const hydratePersonDetail = (person) => {
             _globalDateTsCache.set(dateStr, ts);
         }
         snap._ts = ts;
-    });
+    }
 
     const lastIdx = person.Timeline.length - 1;
     const lastSnap = person.Timeline[lastIdx];
@@ -1370,13 +1372,14 @@ Promise.all([
 
         // Preload exclusion transition map when dates are already present in index.
         state.exclusionTransitionMap = {};
-        state.masterKeys.forEach(name => {
+        for (let i = 0; i < state.masterKeys.length; i++) {
+            const name = state.masterKeys[i];
             const p = indexData[name];
             if (p && p._exclusionDate) {
                 const ts = new Date(p._exclusionDate).getTime();
                 if (!isNaN(ts)) state.exclusionTransitionMap[name] = ts;
             }
-        });
+        }
         if (Object.keys(state.exclusionTransitionMap).length) {
             state.exclusionTransitionsReady = true;
         }
@@ -1384,7 +1387,8 @@ Promise.all([
         // ⚡ Bolt Optimization: Cache Date parsing for hire dates.
         // Many employees share the same start date. A local map avoids redundant parsing.
         const hiredCache = new Map();
-        state.masterKeys.forEach(name => {
+        for (let i = 0; i < state.masterKeys.length; i++) {
+            const name = state.masterKeys[i];
             const p = state.masterData[name];
             const hiredStr = p?.Meta?.['First Hired'];
             p._hiredDateTs = 0;
@@ -1397,7 +1401,7 @@ Promise.all([
                 }
                 p._hiredDateTs = ts;
             }
-        });
+        }
 
         buildKeyBucketsAndCola();
         registerAnalyticsContext();
@@ -1502,14 +1506,17 @@ function loadUpperMiddleManagementMetrics() {
     const buckets = getUniqueBuckets(state.masterKeys);
     state.upperMiddleMetricsPromise = forEachWithConcurrency(buckets, 6, (bucket) => {
         return loadBucket(bucket).then(bucketData => {
-            Object.values(bucketData || {}).forEach(person => {
-                if (!person || !person.Timeline) return;
+            if (!bucketData) return;
+            for (const key in bucketData) {
+                const person = bucketData[key];
+                if (!person || !person.Timeline) continue;
                 hydratePersonDetail(person);
-                person.Timeline.forEach(snap => {
-                    if (!snap || !snap.Date || !byDate[snap.Date]) return;
+                for (let i = 0; i < person.Timeline.length; i++) {
+                    const snap = person.Timeline[i];
+                    if (!snap || !snap.Date || !byDate[snap.Date]) continue;
                     const entry = byDate[snap.Date];
                     const jobs = snap.Jobs || [];
-                    if (jobs.length === 0) return;
+                    if (jobs.length === 0) continue;
                     const titles = jobs.map(job => (job['Job Title'] || '')).join(' | ');
                     const isUpper = includeRe.test(titles) && !excludeRe.test(titles);
                     const pay = snap._pay !== undefined ? snap._pay : calculateSnapshotPay(snap);
@@ -1519,8 +1526,8 @@ function loadUpperMiddleManagementMetrics() {
                         entry.upper += 1;
                         entry.payrollUpper += pay;
                     }
-                });
-            });
+                }
+            }
         });
     })
         .then(() => {
@@ -1637,13 +1644,15 @@ function loadTenureMixMetrics() {
     const getPersonHireTs = (person) => {
         if (person._hiredDateTs && person._hiredDateTs > 0) return person._hiredDateTs;
         let best = 0;
-        (person.Timeline || []).forEach(snap => {
+        const timeline = person.Timeline || [];
+        for (let i = 0; i < timeline.length; i++) {
+            const snap = timeline[i];
             const metaHire = snap?.SnapshotDetails?.['First Hired'] || '';
             const metaTs = parseDateToTs(metaHire);
             if (metaTs && (best === 0 || metaTs < best)) best = metaTs;
             const snapTs = parseDateToTs(snap.Date);
             if (snapTs && (best === 0 || snapTs < best)) best = snapTs;
-        });
+        }
         return best;
     };
 
@@ -2823,7 +2832,8 @@ function buildKeyBucketsAndCola() {
         fulltime_active_unclassified: []
     };
 
-    state.masterKeys.forEach(name => {
+    for (let i = 0; i < state.masterKeys.length; i++) {
+        const name = state.masterKeys[i];
         const person = state.masterData[name];
         const isClassified = !person._isUnclass;
         const isActive = isPersonActive(person);
@@ -3696,13 +3706,14 @@ function calculateStats(keys) {
     let tenure = { t0_2: 0, t2_5: 0, t5_10: 0, t10_plus: 0 };
     const now = new Date().getTime();
 
-    keys.forEach(key => {
+    for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
         const p = state.masterData[key];
         // Calculate stats based on VISIBLE records (matching user filters)
         // Note: If you want stats to ALWAYS be "active only" regardless of view, use isPersonActive(p).
         // Current logic: Stats reflect exactly what is in the filtered list.
         
-        if (!p._hasTimeline) return;
+        if (!p._hasTimeline) continue;
 
         count++; 
         // Optimization: Use cached pay and status
@@ -3726,7 +3737,7 @@ function calculateStats(keys) {
             else if (years < 10) tenure.t5_10++;
             else tenure.t10_plus++;
         }
-    });
+    }
 
     const median = medianFromUnsorted(salaries);
 
