@@ -381,6 +381,9 @@ const splitFieldTerms = (value) => {
     return tokenize(unwrapped);
 };
 
+const _regexCache = new Map();
+const REGEX_CACHE_LIMIT = 500;
+
 const parseQuery = (query) => {
     const raw = (query || '').trim();
     const parsed = {
@@ -405,10 +408,33 @@ const parseQuery = (query) => {
     if (regexMatch) {
         parsed.regex = regexMatch[1];
         parsed.regexFlags = regexMatch[2] || '';
-        try {
-            parsed.regexCompiled = new RegExp(parsed.regex, parsed.regexFlags);
-        } catch (err) {
-            parsed.regexError = err && err.message ? err.message : 'Invalid regex';
+
+        const cacheKey = raw;
+        const cached = _regexCache.get(cacheKey);
+
+        if (cached) {
+            if (cached.error) {
+                parsed.regexError = cached.error;
+            } else {
+                parsed.regexCompiled = cached.regex;
+                if (parsed.regexCompiled.global || parsed.regexCompiled.sticky) {
+                    parsed.regexCompiled.lastIndex = 0;
+                }
+            }
+        } else {
+            try {
+                parsed.regexCompiled = new RegExp(parsed.regex, parsed.regexFlags);
+                if (_regexCache.size >= REGEX_CACHE_LIMIT) {
+                    _regexCache.clear();
+                }
+                _regexCache.set(cacheKey, { regex: parsed.regexCompiled, error: null });
+            } catch (err) {
+                parsed.regexError = err && err.message ? err.message : 'Invalid regex';
+                if (_regexCache.size >= REGEX_CACHE_LIMIT) {
+                    _regexCache.clear();
+                }
+                _regexCache.set(cacheKey, { regex: null, error: parsed.regexError });
+            }
         }
         return parsed;
     }
