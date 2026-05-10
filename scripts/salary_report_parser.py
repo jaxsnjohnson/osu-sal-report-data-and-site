@@ -8,6 +8,10 @@ from html.parser import HTMLParser
 
 
 DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
+NUMBER_CLEAN_RE = re.compile(r"[\d,]+\.?\d*")
+ANNUAL_SALARY_INLINE_RE = re.compile(r"Annual Salary Rate:.*?([\d,]+\.?\d*)")
+ANNUAL_SALARY_RATE_RE = re.compile(r"([\d,]+\.?\d*)\s*(.*)")
+BLOCK_SPLIT_RE = re.compile(r"-{10,}")
 
 TEXT_KEYS = [
     "Name", "Home Orgn", "Job Orgn", "Job Title", "Rank",
@@ -52,7 +56,7 @@ def clean_text(value):
 
 
 def clean_number(value):
-    match = re.search(r"[\d,]+\.?\d*", value or "")
+    match = NUMBER_CLEAN_RE.search(value or "")
     return match.group(0).replace(",", "") if match else ""
 
 
@@ -93,8 +97,8 @@ def parse_text_file(filepath, database):
     with open(filepath, "r", encoding="utf-8") as f:
         content = f.read()
 
-    raw_blocks = re.split(r"-{10,}", content)
-    key_pattern = (
+    raw_blocks = BLOCK_SPLIT_RE.split(content)
+    key_pattern = re.compile(
         r"(" + "|".join(TEXT_KEYS) + r")\s*:\s*(.*?)"
         r"(?=\s*(?:" + "|".join(TEXT_KEYS) + r")\s*:|\s*$)"
     )
@@ -109,11 +113,11 @@ def parse_text_file(filepath, database):
         current_job = {}
 
         for line in block.split("\n"):
-            for key, value in re.findall(key_pattern, line):
+            for key, value in key_pattern.findall(line):
                 value = value.strip()
 
                 if "Annual Salary Rate:" in value:
-                    sal_match = re.search(r"Annual Salary Rate:.*?([\d,]+\.?\d*)", value)
+                    sal_match = ANNUAL_SALARY_INLINE_RE.search(value)
                     if sal_match:
                         current_job["Annual Salary Rate"] = sal_match.group(1)
                         value = value.split("Annual Salary Rate:")[0].strip()
@@ -126,7 +130,7 @@ def parse_text_file(filepath, database):
                     current_job = {}
 
                 if key == "Annual Salary Rate":
-                    match = re.search(r"([\d,]+\.?\d*)\s*(.*)", value)
+                    match = ANNUAL_SALARY_RATE_RE.search(value)
                     if match:
                         value = match.group(1).replace(",", "")
                         term_part = match.group(2).strip()
