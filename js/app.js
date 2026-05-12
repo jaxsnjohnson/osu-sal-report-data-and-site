@@ -444,6 +444,7 @@ const insertSuggestionBkTree = (root, term) => {
 
     let node = root;
     while (node) {
+        if (term === node.term) return root;
         const dist = editDistanceExact(term, node.term);
         const next = node.children.get(dist);
         if (next) {
