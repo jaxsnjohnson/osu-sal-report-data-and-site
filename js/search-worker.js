@@ -339,9 +339,10 @@ const buildOrgAliases = (orgValue) => {
         if (code) aliases.push(code);
         if (tail) {
             aliases.push(tail);
-            tail.split(' ').forEach(tok => {
-                if (tok) aliases.push(tok);
-            });
+            const tailTokens = tail.split(' ');
+            for (let j = 0; j < tailTokens.length; j++) {
+                if (tailTokens[j]) aliases.push(tailTokens[j]);
+            }
         }
     }
     return Array.from(new Set(aliases));
@@ -511,9 +512,14 @@ const parseQuery = (query) => {
     }
 
     const highlights = [];
-    const pushParts = (arr) => arr.forEach(term => tokenize(term).forEach(tok => {
-        if (tok.length > 1) highlights.push(tok);
-    }));
+    const pushParts = (arr) => {
+        for (let i = 0; i < arr.length; i++) {
+            const toks = tokenize(arr[i]);
+            for (let j = 0; j < toks.length; j++) {
+                if (toks[j].length > 1) highlights.push(toks[j]);
+            }
+        }
+    };
     pushParts(parsed.terms);
     pushParts(parsed.nameTerms);
     pushParts(parsed.orgTerms);
@@ -1028,7 +1034,10 @@ const initWorker = async (id, payload) => {
         if (!response.ok) throw new Error(`Failed to load search index: ${response.status}`);
         const data = await response.json();
         records = prepareRecords(data.records || []);
-        recordMap = new Map(records.map(rec => [rec.name, rec]));
+        recordMap = new Map();
+        for (let i = 0; i < records.length; i++) {
+            recordMap.set(records[i].name, records[i]);
+        }
         regexSearchAux = null;
         resultCache.clear();
         isReady = true;
