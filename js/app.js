@@ -134,13 +134,15 @@ const highlightText = (text, terms) => {
 const calculateSnapshotPay = (snapshot) => {
     if (!snapshot || !snapshot.Jobs) return 0;
     let total = 0;
-    snapshot.Jobs.forEach(job => {
+    const jobs = snapshot.Jobs;
+    for (let i = 0; i < jobs.length; i++) {
+        const job = jobs[i];
         // Cache parsed fallback values so repeated pay calculations avoid reparsing.
         const rate = job._rate ?? (job._rate = (parseFloat(job['Annual Salary Rate']) || 0));
         const pct = job._pct ?? (job._pct = (parseFloat(job['Appt Percent']) || 0));
 
         if (rate > 0) total += rate * (pct / 100);
-    });
+    }
     return total;
 };
 
@@ -1454,10 +1456,12 @@ Promise.all([
 // INTERACTIVE CHARTS
 // ==========================================
 function destroyHistoricalCharts() {
-    Object.values(state.historicalCharts || {}).forEach(chart => {
-        if (!chart) return;
+    const charts = state.historicalCharts || {};
+    for (const key in charts) {
+        const chart = charts[key];
+        if (!chart) continue;
         try { chart.destroy(); } catch (e) { /* no-op */ }
-    });
+    }
     state.historicalCharts = {};
     state.transitionChart = null;
 }
@@ -1500,9 +1504,9 @@ function loadUpperMiddleManagementMetrics() {
     const excludeRe = /(vice president|provost|chancellor|president|chief|dean)/i;
     const dates = state.snapshotDates || [];
     const byDate = {};
-    dates.forEach(date => {
-        byDate[date] = { date, upper: 0, total: 0, payrollUpper: 0, payrollTotal: 0 };
-    });
+    for (let i = 0; i < dates.length; i++) {
+        byDate[dates[i]] = { date: dates[i], upper: 0, total: 0, payrollUpper: 0, payrollTotal: 0 };
+    }
 
     const buckets = getUniqueBuckets(state.masterKeys);
     state.upperMiddleMetricsPromise = forEachWithConcurrency(buckets, 6, (bucket) => {
@@ -1566,9 +1570,9 @@ function loadPayDistributionMetrics() {
 
     const dates = state.snapshotDates || [];
     const byDate = {};
-    dates.forEach(date => {
-        byDate[date] = { classPays: [], unclassPays: [] };
-    });
+    for (let i = 0; i < dates.length; i++) {
+        byDate[dates[i]] = { classPays: [], unclassPays: [] };
+    }
 
     const buckets = getUniqueBuckets(state.masterKeys);
     state.payDistributionMetricsPromise = forEachWithConcurrency(buckets, 6, (bucket) => {
@@ -1659,13 +1663,13 @@ function loadTenureMixMetrics() {
 
     const dates = state.snapshotDates || [];
     const byDate = {};
-    dates.forEach(date => {
-        byDate[date] = {
+    for (let i = 0; i < dates.length; i++) {
+        byDate[dates[i]] = {
             classified: { counts: { lt3: 0, threeTo7: 0, sevenTo15: 0, fifteenPlus: 0 }, total: 0 },
             unclassified: { counts: { lt3: 0, threeTo7: 0, sevenTo15: 0, fifteenPlus: 0 }, total: 0 },
             overall: { counts: { lt3: 0, threeTo7: 0, sevenTo15: 0, fifteenPlus: 0 }, total: 0 }
         };
-    });
+    }
 
     const MS_PER_YEAR = 1000 * 60 * 60 * 24 * 365.25;
     const buckets = getUniqueBuckets(state.masterKeys);
@@ -1732,10 +1736,12 @@ function loadTenureMixMetrics() {
 }
 
 function resizeHistoricalCharts() {
-    Object.values(state.historicalCharts || {}).forEach(chart => {
-        if (!chart) return;
+    const charts = state.historicalCharts || {};
+    for (const key in charts) {
+        const chart = charts[key];
+        if (!chart) continue;
         try { chart.resize(); } catch (e) { /* no-op */ }
-    });
+    }
 }
 
 function getHistoricalChartByCanvasId(canvasId) {
@@ -2861,7 +2867,7 @@ function buildKeyBucketsAndCola() {
                 else buckets.fulltime_active_unclassified.push(name);
             }
         }
-    });
+    }
 
     state.keyBuckets = buckets;
 }
@@ -2912,12 +2918,15 @@ window.showFormerEmployeesInSearch = function() {
 // PERSON CHARTS
 // ==========================================
 function destroyPersonCharts() {
-    Object.values(state.personCharts).forEach(chart => {
+    const charts = state.personCharts || {};
+    for (const key in charts) {
+        const chart = charts[key];
+        if (!chart) continue;
         try { chart.destroy(); } catch (e) { /* no-op */ }
-        if (chart && chart._gapPulseTimer) {
+        if (chart._gapPulseTimer) {
             clearInterval(chart._gapPulseTimer);
         }
-    });
+    }
     state.personCharts = {};
 }
 
@@ -3742,13 +3751,21 @@ function calculateStats(keys) {
 
     const median = medianFromUnsorted(salaries);
 
+    const orgEntries = [];
+    for (const org in orgs) orgEntries.push([org, orgs[org]]);
+    const topOrgs = orgEntries.sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+    const roleEntries = [];
+    for (const role in roles) roleEntries.push([role, roles[role]]);
+    const topRoles = roleEntries.sort((a, b) => b[1] - a[1]).slice(0, 4);
+
     return { 
         count, 
         medianSalary: median, 
         classified, 
         unclassified, 
-        topOrgs: Object.entries(orgs).sort((a, b) => b[1] - a[1]).slice(0, 5), 
-        topRoles: Object.entries(roles).sort((a, b) => b[1] - a[1]).slice(0, 4), 
+        topOrgs,
+        topRoles,
         tenure 
     };
 }
@@ -3788,18 +3805,29 @@ function updateDonut(roles, total) {
     const colors = ['#D73F09', '#b83508', '#992c06', '#7a2205', '#444444'];
     let currentDeg = 0, gradientParts = [], otherCount = total;
 
-    roles.forEach(([role, count], idx) => {
+    for (let idx = 0; idx < roles.length; idx++) {
+        const roleData = roles[idx];
+        const role = roleData[0];
+        const count = roleData[1];
         const deg = (count / total) * 360;
         gradientParts.push(`${colors[idx]} ${currentDeg}deg ${currentDeg + deg}deg`);
         currentDeg += deg;
         otherCount -= count;
-    });
+    }
     if (otherCount > 0) gradientParts.push(`${colors[4]} ${currentDeg}deg 360deg`);
 
     els.roleDonut.style.background = `conic-gradient(${gradientParts.join(', ')})`;
-    els.roleLegend.innerHTML = roles.map(([role, count], idx) => `
-        <div class="legend-item"><span class="dot" style="background:${colors[idx]}"></span> ${escapeHtml(role)} (${Math.round(count/total*100)}%)</div>
-    `).join('') + (otherCount > 0 ? `<div class="legend-item"><span class="dot" style="background:${colors[4]}"></span> Other (${Math.round(otherCount/total*100)}%)</div>` : '');
+    let legendHTML = '';
+    for (let idx = 0; idx < roles.length; idx++) {
+        const roleData = roles[idx];
+        const role = roleData[0];
+        const count = roleData[1];
+        legendHTML += `<div class="legend-item"><span class="dot" style="background:${colors[idx]}"></span> ${escapeHtml(role)} (${Math.round(count/total*100)}%)</div>`;
+    }
+    if (otherCount > 0) {
+        legendHTML += `<div class="legend-item"><span class="dot" style="background:${colors[4]}"></span> Other (${Math.round(otherCount/total*100)}%)</div>`;
+    }
+    els.roleLegend.innerHTML = legendHTML;
 }
 
 function personOrg(p) {
@@ -3820,12 +3848,15 @@ function buildHistoryHTML(person, chartId, name) {
         return `<div class="history-loading">No detailed history available.</div>`;
     }
 
-    const reversedTimeline = person.Timeline.slice().reverse();
-    const reportHistoryHTML = person.Timeline.map(snap => `<span class="badge badge-source" style="margin-right:4px; margin-bottom:4px;">${escapeHtml(snap.Date)}</span>`).join('');
+    let reportHistoryHTML = '';
+    for (let i = 0; i < person.Timeline.length; i++) {
+        reportHistoryHTML += `<span class="badge badge-source" style="margin-right:4px; margin-bottom:4px;">${escapeHtml(person.Timeline[i].Date)}</span>`;
+    }
     const recordGaps = getRecordGaps(person);
-    const recordGapHTML = recordGaps.length
-        ? recordGaps.map(gap => `<div class="record-gap">No data between ${escapeHtml(formatDate(gap.start))} and ${escapeHtml(formatDate(gap.end))}</div>`).join('')
-        : '';
+    let recordGapHTML = '';
+    for (let i = 0; i < recordGaps.length; i++) {
+        recordGapHTML += `<div class="record-gap">No data between ${escapeHtml(formatDate(recordGaps[i].start))} and ${escapeHtml(formatDate(recordGaps[i].end))}</div>`;
+    }
     const summary = name ? (state.masterData[name] || {}) : {};
     const dataFlags = [];
     if (summary._payMissing) dataFlags.push('Missing salary rate in one or more appointments.');
@@ -3836,9 +3867,58 @@ function buildHistoryHTML(person, chartId, name) {
         dataFlags.push(`Possible COLA not received${labels}.`);
     }
     if (recordGaps.length) dataFlags.push(`Missing ${recordGaps.length} snapshot gap${recordGaps.length === 1 ? '' : 's'} in timeline.`);
-    const dataQualityHTML = dataFlags.length
-        ? `<div class="data-quality"><strong>Data quality flags:</strong>${dataFlags.map(flag => `<div>${escapeHtml(flag)}</div>`).join('')}</div>`
-        : '';
+    let dataQualityHTML = '';
+    if (dataFlags.length) {
+        dataQualityHTML = `<div class="data-quality"><strong>Data quality flags:</strong>`;
+        for (let i = 0; i < dataFlags.length; i++) {
+            dataQualityHTML += `<div>${escapeHtml(dataFlags[i])}</div>`;
+        }
+        dataQualityHTML += `</div>`;
+    }
+
+    let tbodyHTML = '';
+    for (let i = person.Timeline.length - 1; i >= 0; i--) {
+        const snap = person.Timeline[i];
+        const prevSnap = i > 0 ? person.Timeline[i - 1] : null;
+        let prevJobsMap = null;
+        if (prevSnap && prevSnap.Jobs) {
+            prevJobsMap = new Map();
+            for (let j = 0; j < prevSnap.Jobs.length; j++) {
+                const pj = prevSnap.Jobs[j];
+                if (pj['Posn-Suff']) prevJobsMap.set(pj['Posn-Suff'], pj);
+            }
+        }
+        const jobs = snap.Jobs || [];
+        for (let j = 0; j < jobs.length; j++) {
+            const job = jobs[j];
+            let diffHTML = '';
+            if (prevJobsMap && !job._missingRate) {
+                const prevJob = prevJobsMap.get(job['Posn-Suff']);
+                if (prevJob && !prevJob._missingRate) {
+                    // Optimization: Use pre-parsed _rate
+                    const currRate = job._rate !== undefined ? job._rate : cleanMoney(job['Annual Salary Rate']);
+                    const prevRate = prevJob._rate !== undefined ? prevJob._rate : cleanMoney(prevJob['Annual Salary Rate']);
+                    const diff = currRate - prevRate;
+                    if (diff !== 0 && prevRate > 0) {
+                        const pct = (diff / prevRate) * 100;
+                        diffHTML = `<span class="diff-val ${diff > 0 ? 'diff-positive' : 'diff-negative'}">${diff > 0 ? '+' : ''}${formatMoney(diff)} (${diff > 0 ? '+' : ''}${pct.toFixed(1)}%)</span>`;
+                    }
+                }
+            }
+            const termBadge = job['Salary Term'] ? ` <span class="term-badge">${job['Salary Term']}</span>` : '';
+            const hourlyRate = cleanMoney(job['Hourly Rate']);
+            const hourlyRateText = hourlyRate > 0
+                ? `<div class="hourly-rate">Hourly: ${formatHourlyMoney(hourlyRate)}/hr</div>`
+                : '';
+            const salaryText = job._missingRate
+                ? `<span class="missing-pay" data-tooltip="Report lists only the appointment term; no salary rate was provided.">Rate missing</span>${termBadge}`
+                : `${formatMoney(job['Annual Salary Rate'])}${termBadge}`;
+            tbodyHTML += `<tr><td class="date-cell"><div>${escapeHtml(formatDate(snap.Date))}</div><div class="badge badge-source">${escapeHtml((snap.Source || '').substring(0, 15))}...</div></td>
+                <td><div style="font-weight:600;">${escapeHtml(job['Job Title'] || '')}</div><div style="font-size:0.85rem; color:#64748b;">${escapeHtml(job['Job Orgn'] || '')}</div></td>
+                <td><span class="badge badge-type">${escapeHtml(job['Job Type'] || '?')}</span></td>
+                <td class="money-cell">${salaryText}${hourlyRateText}${diffHTML}</td></tr>`;
+        }
+    }
 
     return `
             <div class="history-meta" style="margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #444; font-size: 0.9rem; color: #a0a0a0;">
@@ -3873,44 +3953,7 @@ function buildHistoryHTML(person, chartId, name) {
                     <table>
                         <thead><tr><th>Date & Source</th><th>Job Details</th><th>Type</th><th>Salary</th></tr></thead>
                         <tbody>
-                            ${reversedTimeline.map((snap, snapIdx) => {
-                                const prevSnap = reversedTimeline[snapIdx + 1];
-                                let prevJobsMap = null;
-                                if (prevSnap && prevSnap.Jobs) {
-                                    prevJobsMap = new Map();
-                                    for (const pj of prevSnap.Jobs) {
-                                        if (pj['Posn-Suff']) prevJobsMap.set(pj['Posn-Suff'], pj);
-                                    }
-                                }
-                                return (snap.Jobs || []).map(job => {
-                                    let diffHTML = '';
-                                    if (prevJobsMap && !job._missingRate) {
-                                        const prevJob = prevJobsMap.get(job['Posn-Suff']);
-                                        if (prevJob && !prevJob._missingRate) {
-                                            // Optimization: Use pre-parsed _rate
-                                            const currRate = job._rate !== undefined ? job._rate : cleanMoney(job['Annual Salary Rate']);
-                                            const prevRate = prevJob._rate !== undefined ? prevJob._rate : cleanMoney(prevJob['Annual Salary Rate']);
-                                            const diff = currRate - prevRate;
-                                            if (diff !== 0 && prevRate > 0) {
-                                                const pct = (diff / prevRate) * 100;
-                                                diffHTML = `<span class="diff-val ${diff > 0 ? 'diff-positive' : 'diff-negative'}">${diff > 0 ? '+' : ''}${formatMoney(diff)} (${diff > 0 ? '+' : ''}${pct.toFixed(1)}%)</span>`;
-                                            }
-                                        }
-                                    }
-                                    const termBadge = job['Salary Term'] ? ` <span class="term-badge">${job['Salary Term']}</span>` : '';
-                                    const hourlyRate = cleanMoney(job['Hourly Rate']);
-                                    const hourlyRateText = hourlyRate > 0
-                                        ? `<div class="hourly-rate">Hourly: ${formatHourlyMoney(hourlyRate)}/hr</div>`
-                                        : '';
-                                    const salaryText = job._missingRate
-                                        ? `<span class="missing-pay" data-tooltip="Report lists only the appointment term; no salary rate was provided.">Rate missing</span>${termBadge}`
-                                        : `${formatMoney(job['Annual Salary Rate'])}${termBadge}`;
-                                    return `<tr><td class="date-cell"><div>${escapeHtml(formatDate(snap.Date))}</div><div class="badge badge-source">${escapeHtml((snap.Source || '').substring(0, 15))}...</div></td>
-                                        <td><div style="font-weight:600;">${escapeHtml(job['Job Title'] || '')}</div><div style="font-size:0.85rem; color:#64748b;">${escapeHtml(job['Job Orgn'] || '')}</div></td>
-                                        <td><span class="badge badge-type">${escapeHtml(job['Job Type'] || '?')}</span></td>
-                                        <td class="money-cell">${salaryText}${hourlyRateText}${diffHTML}</td></tr>`;
-                                }).join('')
-                            }).join('')}
+                            ${tbodyHTML}
                         </tbody>
                     </table>
                     </div>
