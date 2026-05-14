@@ -1536,11 +1536,14 @@ function loadUpperMiddleManagementMetrics() {
         });
     })
         .then(() => {
-            const points = dates.map(date => {
+            const len = dates.length;
+            const points = new Array(len);
+            for (let i = 0; i < len; i++) {
+                const date = dates[i];
                 const row = byDate[date] || { upper: 0, total: 0, payrollUpper: 0, payrollTotal: 0 };
                 const headcountSharePct = row.total > 0 ? (row.upper / row.total) * 100 : null;
                 const payrollSharePct = row.payrollTotal > 0 ? (row.payrollUpper / row.payrollTotal) * 100 : null;
-                return {
+                points[i] = {
                     date,
                     upper: row.upper,
                     total: row.total,
@@ -1549,7 +1552,7 @@ function loadUpperMiddleManagementMetrics() {
                     headcountSharePct,
                     payrollSharePct
                 };
-            });
+            }
             state.upperMiddleMetrics = { points };
             return state.upperMiddleMetrics;
         })
@@ -1597,9 +1600,12 @@ function loadPayDistributionMetrics() {
         });
     })
         .then(() => {
-            const points = dates.map(date => {
+            const len = dates.length;
+            const points = new Array(len);
+            for (let i = 0; i < len; i++) {
+                const date = dates[i];
                 const entry = byDate[date] || { classPays: [], unclassPays: [] };
-                return {
+                points[i] = {
                     date,
                     pct10Class: quantileValue(entry.classPays, 0.1),
                     pct50Class: quantileValue(entry.classPays, 0.5),
@@ -1608,7 +1614,7 @@ function loadPayDistributionMetrics() {
                     pct50Unclass: quantileValue(entry.unclassPays, 0.5),
                     pct90Unclass: quantileValue(entry.unclassPays, 0.9)
                 };
-            });
+            }
             state.payDistributionMetrics = { points };
             return state.payDistributionMetrics;
         })
@@ -1709,18 +1715,21 @@ function loadTenureMixMetrics() {
         });
     })
         .then(() => {
-            const points = dates.map(date => {
+            const len = dates.length;
+            const points = new Array(len);
+            for (let i = 0; i < len; i++) {
+                const date = dates[i];
                 const row = byDate[date];
                 const classifiedShares = computeTenureShares(row.classified.counts, row.classified.total);
                 const unclassifiedShares = computeTenureShares(row.unclassified.counts, row.unclassified.total);
                 const overallShares = computeTenureShares(row.overall.counts, row.overall.total);
-                return {
+                points[i] = {
                     date,
                     classified: { counts: row.classified.counts, shares: classifiedShares, total: row.classified.total },
                     unclassified: { counts: row.unclassified.counts, shares: unclassifiedShares, total: row.unclassified.total },
                     overall: { counts: row.overall.counts, shares: overallShares, total: row.overall.total }
                 };
-            });
+            }
             state.tenureMixMetrics = { points };
             return state.tenureMixMetrics;
         })
@@ -3712,7 +3721,7 @@ function medianFromUnsorted(values) {
 
 function calculateStats(keys) {
     let count = 0, classified = 0, unclassified = 0, salaries = [];
-    let orgs = {}, roles = {};
+    let orgs = new Map(), roles = new Map();
     let tenure = { t0_2: 0, t2_5: 0, t5_10: 0, t10_plus: 0 };
     const now = new Date().getTime();
 
@@ -3732,11 +3741,11 @@ function calculateStats(keys) {
         if (p._isUnclass) unclassified++; else classified++;
 
         const org = personOrg(p) || 'Unknown';
-        orgs[org] = (orgs[org] || 0) + 1;
+        orgs.set(org, (orgs.get(org) || 0) + 1);
         
         const lastJob = p._lastJob || {};
         const role = lastJob['Job Title'] || 'Unknown';
-        roles[role] = (roles[role] || 0) + 1;
+        roles.set(role, (roles.get(role) || 0) + 1);
 
         // Optimization: Use pre-parsed _hiredDateTs
         const hiredTs = p._hiredDateTs;
@@ -3751,13 +3760,32 @@ function calculateStats(keys) {
 
     const median = medianFromUnsorted(salaries);
 
-    const orgEntries = [];
-    for (const org in orgs) orgEntries.push([org, orgs[org]]);
-    const topOrgs = orgEntries.sort((a, b) => b[1] - a[1]).slice(0, 5);
+    // ⚡ Bolt Optimization: Replace full array conversion and O(N log N) sorting with O(N) top-K linear scan.
+    const getTopK = (map, k) => {
+        let top = [];
+        for (const [key, value] of map) {
+            if (top.length < k) {
+                top.push([key, value]);
+                if (top.length === k) top.sort((a, b) => a[1] - b[1]);
+            } else if (value > top[0][1]) {
+                top[0] = [key, value];
+                for (let j = 0; j < k - 1; j++) {
+                    if (top[j][1] > top[j + 1][1]) {
+                        const temp = top[j];
+                        top[j] = top[j + 1];
+                        top[j + 1] = temp;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+        if (top.length < k) top.sort((a, b) => a[1] - b[1]);
+        return top.reverse();
+    };
 
-    const roleEntries = [];
-    for (const role in roles) roleEntries.push([role, roles[role]]);
-    const topRoles = roleEntries.sort((a, b) => b[1] - a[1]).slice(0, 4);
+    const topOrgs = getTopK(orgs, 5);
+    const topRoles = getTopK(roles, 4);
 
     return { 
         count, 
@@ -3803,20 +3831,25 @@ function updateDashboard(stats) {
 function updateDonut(roles, total) {
     if (!roles.length) return;
     const colors = ['#D73F09', '#b83508', '#992c06', '#7a2205', '#444444'];
-    let currentDeg = 0, gradientParts = [], otherCount = total;
+    let currentDeg = 0, otherCount = total;
+    let gradientPartsStr = '';
 
     for (let idx = 0; idx < roles.length; idx++) {
         const roleData = roles[idx];
-        const role = roleData[0];
         const count = roleData[1];
         const deg = (count / total) * 360;
-        gradientParts.push(`${colors[idx]} ${currentDeg}deg ${currentDeg + deg}deg`);
+        if (gradientPartsStr) gradientPartsStr += ', ';
+        gradientPartsStr += `${colors[idx]} ${currentDeg}deg ${currentDeg + deg}deg`;
         currentDeg += deg;
         otherCount -= count;
     }
-    if (otherCount > 0) gradientParts.push(`${colors[4]} ${currentDeg}deg 360deg`);
+    if (otherCount > 0) {
+        if (gradientPartsStr) gradientPartsStr += ', ';
+        gradientPartsStr += `${colors[4]} ${currentDeg}deg 360deg`;
+    }
 
-    els.roleDonut.style.background = `conic-gradient(${gradientParts.join(', ')})`;
+    els.roleDonut.style.background = `conic-gradient(${gradientPartsStr})`;
+
     let legendHTML = '';
     for (let idx = 0; idx < roles.length; idx++) {
         const roleData = roles[idx];
