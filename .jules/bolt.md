@@ -49,3 +49,7 @@
 ## $(date +%Y-%m-%d) - Pre-compile regexes in Python parsing scripts
 **Learning:** Python's `re.search`, `re.split`, and `re.findall` with inline string patterns compile the regexes on every execution. In high-frequency loops (e.g., parsing 50,000 text blocks per file), this causes significant CPU overhead.
 **Action:** Pre-compiled all frequently used regex patterns (`re.compile(...)`) at the module level in `scripts/salary_report_parser.py` and used the compiled objects' `.search`, `.split`, and `.findall` methods, resulting in a ~22% speedup.
+
+## 2026-05-18 - Optimize Analytics Aggregations and Top-K Selection
+**Learning:** `calculateStats` was heavily utilized during search filtering. Creating frequency maps via raw JavaScript objects (`{}`) incurs prototype overhead. Additionally, flattening these objects into arrays with `Object.entries()` followed by a complete `Array.prototype.sort()` to extract only the top 4 or 5 items results in unneeded O(N log N) overhead and memory allocations.
+**Action:** Use ES6 `Map`s for high-frequency tracking (e.g., role counts). Replace `Array.sort().slice(0, K)` with an O(N) top-K linear scan function when `K` is small (like 4 or 5) to dramatically reduce sorting time and intermediate array allocations.
