@@ -4007,7 +4007,7 @@ function generateCardHTML(name, idx) {
     const cardId = `card-${idx}`;
     const historyId = `history-${idx}`;
     const chartId = `person-trend-${idx}`;
-    const attrName = name.replace(/"/g, '&quot;');
+    const attrName = escapeHtmlAttr(name);
     const totalPay = person._totalPay || 0;
     const totalPayLabel = person._payMissing
         ? (totalPay > 0 ? `${formatMoney(totalPay)}*` : 'Pay missing')
@@ -4022,7 +4022,7 @@ function generateCardHTML(name, idx) {
         ? `Possible COLA not received (${person._colaMissedLabels.join(', ')})`
         : 'Possible COLA not received for listed events.';
     const colaWarningHTML = (!person._isUnclass && person._colaMissing)
-        ? `<span class="cola-warning" data-tooltip="${colaTooltip}">!</span>`
+        ? `<span class="cola-warning" data-tooltip="${escapeHtmlAttr(colaTooltip)}">!</span>`
         : '';
     const exclusionTooltip = 'Possible exclusion (classified → unclassified at some point).';
     const exclusionWarningHTML = person._wasExcluded
