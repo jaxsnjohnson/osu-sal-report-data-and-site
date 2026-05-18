@@ -3554,7 +3554,7 @@ function updateSearchSuggestions() {
                 </button>
             ` : ''}
             ${suggestions.map(item => `
-                <button class="suggestion-chip" data-tooltip="Suggested ${item.type}" onclick="applySearch('${escapeForSingleQuote(item.value)}', 'search_suggestion')">
+                <button class="suggestion-chip" data-tooltip="Suggested ${item.type}" onclick="applySearch('${escapeHtmlAttr(escapeForSingleQuote(item.value))}', 'search_suggestion')">
                     ${escapeHtml(item.value)}
                 </button>
             `).join('')}
@@ -4114,7 +4114,7 @@ function renderInitial() {
             ? `<button class="suggestion-chip" onclick="showFormerEmployeesInSearch()">Show former employees</button>`
             : '';
         const suggestionBtns = quickSuggestions.map(item => `
-            <button class="suggestion-chip" onclick="applySearch('${escapeForSingleQuote(item.value || '')}', 'search_suggestion')">${escapeHtml(item.value || '')}</button>
+            <button class="suggestion-chip" onclick="applySearch('${escapeHtmlAttr(escapeForSingleQuote(item.value || ''))}', 'search_suggestion')">${escapeHtml(item.value || '')}</button>
         `).join('');
         const warning = state.searchWarning ? `<div class="suggestions-title">${escapeHtml(state.searchWarning)}</div>` : '';
         els.results.innerHTML = `
