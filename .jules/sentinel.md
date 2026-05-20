@@ -10,3 +10,7 @@
 **Vulnerability:** `escapeForSingleQuote` was escaping only single quotes and backslashes for use in inline event handlers (e.g. `onclick="applySearch('${value}')"`). The browser parses and decodes HTML entities inside attribute values *before* the JavaScript runtime executes the handler. By providing an entity like `&apos;`, an attacker can break out of the string context in the decoded JavaScript string.
 **Learning:** Single-quote escaping (`\'`) is insufficient when the string is injected into an HTML attribute that evaluates as JavaScript (like `onclick`). The browser HTML parser processes the string first, allowing HTML entities to bypass simple JS escapes.
 **Prevention:** Always perform full HTML entity escaping (`&`, `<`, `>`, `"`) in addition to JavaScript escaping (`\'`, `\\`) for dynamically injected inline event handlers.
+## 2024-05-24 - Unescaped User Input in DOM Interpolation
+**Vulnerability:** User-controlled JSON data attributes (`item.type` and `job['Salary Term']`) were dynamically injected into the DOM as HTML text and inside HTML attributes (`data-tooltip`) without appropriate sanitization.
+**Learning:** Even variables fetched from backend APIs or JSON datasets should be treated as potentially malicious input. Interpolating them without an escaping function opens the application to DOM-based XSS attacks.
+**Prevention:** Always explicitly wrap dynamically loaded data in HTML templates with sanitization utilities such as `escapeHtml()` for generic string nodes and `escapeHtmlAttr()` for HTML attributes.
