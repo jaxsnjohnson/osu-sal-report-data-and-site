@@ -3554,7 +3554,7 @@ function updateSearchSuggestions() {
                 </button>
             ` : ''}
             ${suggestions.map(item => `
-                <button class="suggestion-chip" data-tooltip="Suggested ${item.type}" onclick="applySearch('${escapeHtmlAttr(escapeForSingleQuote(item.value))}', 'search_suggestion')">
+                <button class="suggestion-chip" data-tooltip="Suggested ${escapeHtmlAttr(item.type)}" onclick="applySearch('${escapeHtmlAttr(escapeForSingleQuote(item.value))}', 'search_suggestion')">
                     ${escapeHtml(item.value)}
                 </button>
             `).join('')}
@@ -3938,7 +3938,7 @@ function buildHistoryHTML(person, chartId, name) {
                     }
                 }
             }
-            const termBadge = job['Salary Term'] ? ` <span class="term-badge">${job['Salary Term']}</span>` : '';
+            const termBadge = job['Salary Term'] ? ` <span class="term-badge">${escapeHtml(job['Salary Term'])}</span>` : '';
             const hourlyRate = cleanMoney(job['Hourly Rate']);
             const hourlyRateText = hourlyRate > 0
                 ? `<div class="hourly-rate">Hourly: ${formatHourlyMoney(hourlyRate)}/hr</div>`
