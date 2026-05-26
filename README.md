@@ -76,6 +76,7 @@ You will need a Unix-like environment (Linux, macOS, or WSL) with the following 
     chmod +x convert_data.sh
     ./convert_data.sh
     ```
+    The script caches `pdftotext` output in `temp_txt/` and skips unchanged PDFs. Use `FORCE_REBUILD=1 ./convert_data.sh` to reconvert every PDF. By default it writes only the web artifacts; use `WRITE_RAW_DATA=1 ./convert_data.sh` when you also need to refresh `data.json`.
 
 4.  **Run the Site:**
     Since this is a static site, you can open `index.html` directly in your browser, or use a simple local server:

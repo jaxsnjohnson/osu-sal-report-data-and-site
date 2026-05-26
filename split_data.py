@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
+import argparse
 import json
 import os
 import re
 import string
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
+from datetime import datetime
 
 COLA_EVENTS = [
     {"label": "6.5% COLA", "effective": "2024-04-01", "pct": 6.5},
@@ -26,6 +28,29 @@ PEOPLE_DIR = os.path.join(OUT_DIR, "people")
 INDEX_PATH = os.path.join(OUT_DIR, "index.json")
 AGG_PATH = os.path.join(OUT_DIR, "aggregates.json")
 SEARCH_INDEX_PATH = os.path.join(OUT_DIR, "search-index.json")
+PEER_MEDIAN_PATH = os.path.join(OUT_DIR, "peer-medians.json")
+
+PAIRED_SNAPSHOT_WINDOW_DAYS = 120
+
+ROLE_GROUP_INCLUDE_TERMS = [
+    "associate director",
+    "assistant director",
+    "senior director",
+    "director",
+    "manager",
+    "head",
+    "chair",
+]
+ROLE_GROUP_EXCLUDE_TERMS = [
+    "vice president",
+    "provost",
+    "chancellor",
+    "president",
+    "chief",
+    "dean",
+]
+ROLE_GROUP_INCLUDE_RE = re.compile("|".join(re.escape(term) for term in ROLE_GROUP_INCLUDE_TERMS), re.I)
+ROLE_GROUP_EXCLUDE_RE = re.compile("|".join(re.escape(term) for term in ROLE_GROUP_EXCLUDE_TERMS), re.I)
 
 
 def parse_float(val):
@@ -126,15 +151,294 @@ def bucket_for_name(name):
     return "_"
 
 
-def main():
-    if not os.path.exists(RAW_PATH):
-        raise SystemExit(f"Missing {RAW_PATH}. Run convert_data.sh first.")
+def class_state_from_source(source):
+    src = (source or "").lower()
+    if "unclass" in src:
+        return "unclassified"
+    if "class" in src:
+        return "classified"
+    return ""
 
-    with open(RAW_PATH, "r", encoding="utf-8") as f:
-        data = json.load(f)
 
-    os.makedirs(PEOPLE_DIR, exist_ok=True)
+def safe_pct(part, total):
+    return (part / total) * 100.0 if total else None
 
+
+def quantile_sorted(values, p):
+    if not values:
+        return None
+    if len(values) == 1:
+        return values[0]
+    idx = (len(values) - 1) * p
+    lower = int(idx)
+    upper = lower if idx == lower else lower + 1
+    if lower == upper:
+        return values[lower]
+    weight = idx - lower
+    return values[lower] * (1 - weight) + values[upper] * weight
+
+
+def quantile(values, p):
+    if not values:
+        return None
+    return quantile_sorted(sorted(values), p)
+
+
+def safe_ratio(num, den):
+    if num is None or den is None or den <= 0:
+        return None
+    return num / den
+
+
+def parse_date(value):
+    if not value:
+        return None
+    text = str(value).strip()
+    for fmt in ("%Y-%m-%d", "%d-%b-%Y", "%d-%B-%Y", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def days_between(later, earlier):
+    later_date = parse_date(later)
+    earlier_date = parse_date(earlier)
+    if not later_date or not earlier_date:
+        return None
+    return (later_date - earlier_date).days
+
+
+def tenure_band_for_dates(hired, snapshot_date):
+    hired_date = parse_date(hired)
+    snap_date = parse_date(snapshot_date)
+    if not hired_date or not snap_date:
+        return None
+    years = (snap_date - hired_date).days / 365.25
+    if years < 0:
+        return None
+    if years >= 15:
+        return "fifteenPlus"
+    if years >= 7:
+        return "sevenTo15"
+    if years >= 3:
+        return "threeTo7"
+    return "lt3"
+
+
+def get_person_hire_date(person):
+    candidates = []
+    meta = person.get("Meta") or {}
+    if meta.get("First Hired"):
+        candidates.append(meta.get("First Hired"))
+    for snap in person.get("Timeline") or []:
+        details = snap.get("SnapshotDetails") or {}
+        if details.get("First Hired"):
+            candidates.append(details.get("First Hired"))
+    dated = [(parse_date(value), value) for value in candidates]
+    dated = [(date_value, raw) for date_value, raw in dated if date_value]
+    if not dated:
+        return ""
+    dated.sort(key=lambda item: item[0])
+    return dated[0][1]
+
+
+def empty_tenure_group():
+    return {
+        "counts": {"lt3": 0, "threeTo7": 0, "sevenTo15": 0, "fifteenPlus": 0},
+        "total": 0,
+    }
+
+
+def empty_tenure_row():
+    return {
+        "classified": empty_tenure_group(),
+        "unclassified": empty_tenure_group(),
+        "overall": empty_tenure_group(),
+    }
+
+
+def add_tenure_count(row, class_state, band):
+    class_key = "unclassified" if class_state == "unclassified" else "classified"
+    row[class_key]["counts"][band] += 1
+    row[class_key]["total"] += 1
+    row["overall"]["counts"][band] += 1
+    row["overall"]["total"] += 1
+
+
+def compute_tenure_shares(group):
+    counts = group["counts"]
+    total = group["total"]
+    return {
+        "lt3": safe_pct(counts["lt3"], total),
+        "threeTo7": safe_pct(counts["threeTo7"], total),
+        "sevenTo15": safe_pct(counts["sevenTo15"], total),
+        "fifteenPlus": safe_pct(counts["fifteenPlus"], total),
+    }
+
+
+def is_role_group_snapshot(jobs):
+    titles = " | ".join((job.get("Job Title") or "") for job in (jobs or []))
+    if not titles:
+        return False
+    return bool(ROLE_GROUP_INCLUDE_RE.search(titles)) and not bool(ROLE_GROUP_EXCLUDE_RE.search(titles))
+
+
+def build_paired_history_stats(history_stats, window_days=PAIRED_SNAPSHOT_WINDOW_DAYS):
+    rows = sorted(history_stats or [], key=lambda row: row.get("date") or "")
+    paired = []
+    seen = set()
+    latest_classified = None
+    latest_unclassified = None
+
+    for row in rows:
+        date = row.get("date") or ""
+        if row.get("classified", 0) > 0:
+            latest_classified = row
+        if row.get("unclassified", 0) > 0:
+            latest_unclassified = row
+        if not latest_classified or not latest_unclassified:
+            continue
+
+        class_days = days_between(date, latest_classified.get("date"))
+        unclass_days = days_between(date, latest_unclassified.get("date"))
+        if class_days is None or unclass_days is None:
+            continue
+        if class_days < 0 or unclass_days < 0:
+            continue
+        if class_days > window_days or unclass_days > window_days:
+            continue
+
+        pair_key = (latest_classified.get("date"), latest_unclassified.get("date"))
+        if pair_key in seen:
+            continue
+        seen.add(pair_key)
+
+        payroll_classified = latest_classified.get("payrollClassified", 0.0) or 0.0
+        payroll_unclassified = latest_unclassified.get("payrollUnclassified", 0.0) or 0.0
+        paired.append({
+            "date": date,
+            "classifiedDate": latest_classified.get("date", ""),
+            "unclassifiedDate": latest_unclassified.get("date", ""),
+            "classified": latest_classified.get("classified", 0) or 0,
+            "unclassified": latest_unclassified.get("unclassified", 0) or 0,
+            "payroll": payroll_classified + payroll_unclassified,
+            "payrollClassified": payroll_classified,
+            "payrollUnclassified": payroll_unclassified,
+            "windowDays": max(class_days, unclass_days),
+        })
+    return paired
+
+
+def top_share(values, pct):
+    if not values:
+        return None
+    sorted_values = sorted(values, reverse=True)
+    total = sum(sorted_values)
+    if total <= 0:
+        return None
+    count = max(1, int(len(sorted_values) * pct + 0.999999))
+    return (sum(sorted_values[:count]) / total) * 100.0
+
+
+def build_pay_concentration_points(dates, pay_values_by_date):
+    points = []
+    for date in dates:
+        values = [value for value in pay_values_by_date.get(date, []) if value > 0]
+        sorted_values = sorted(values)
+        p10 = quantile_sorted(sorted_values, 0.10)
+        p50 = quantile_sorted(sorted_values, 0.50)
+        p90 = quantile_sorted(sorted_values, 0.90)
+        points.append({
+            "date": date,
+            "headcount": len(sorted_values),
+            "payroll": sum(sorted_values),
+            "top1SharePct": top_share(sorted_values, 0.01),
+            "top5SharePct": top_share(sorted_values, 0.05),
+            "top10SharePct": top_share(sorted_values, 0.10),
+            "p90P50Ratio": safe_ratio(p90, p50),
+            "p50P10Ratio": safe_ratio(p50, p10),
+        })
+    return {"points": points}
+
+
+def build_pay_distribution_points(dates, pay_values_by_date_class):
+    points = []
+    for date in dates:
+        entry = pay_values_by_date_class.get(date, {})
+        class_values = sorted(value for value in entry.get("classified", []) if value > 0)
+        unclass_values = sorted(value for value in entry.get("unclassified", []) if value > 0)
+        overall_values = sorted(value for value in entry.get("overall", []) if value > 0)
+        points.append({
+            "date": date,
+            "pct10Class": quantile_sorted(class_values, 0.10),
+            "pct50Class": quantile_sorted(class_values, 0.50),
+            "pct90Class": quantile_sorted(class_values, 0.90),
+            "pct10Unclass": quantile_sorted(unclass_values, 0.10),
+            "pct50Unclass": quantile_sorted(unclass_values, 0.50),
+            "pct90Unclass": quantile_sorted(unclass_values, 0.90),
+            "pct10Overall": quantile_sorted(overall_values, 0.10),
+            "pct50Overall": quantile_sorted(overall_values, 0.50),
+            "pct90Overall": quantile_sorted(overall_values, 0.90),
+        })
+    return {"points": points}
+
+
+def build_tenure_mix_points(dates, tenure_by_date):
+    points = []
+    for date in dates:
+        row = tenure_by_date.get(date) or empty_tenure_row()
+        points.append({
+            "date": date,
+            "classified": {
+                "counts": row["classified"]["counts"],
+                "shares": compute_tenure_shares(row["classified"]),
+                "total": row["classified"]["total"],
+            },
+            "unclassified": {
+                "counts": row["unclassified"]["counts"],
+                "shares": compute_tenure_shares(row["unclassified"]),
+                "total": row["unclassified"]["total"],
+            },
+            "overall": {
+                "counts": row["overall"]["counts"],
+                "shares": compute_tenure_shares(row["overall"]),
+                "total": row["overall"]["total"],
+            },
+        })
+    return {"points": points}
+
+
+def build_role_group_concentration_points(dates, role_group_by_date):
+    points = []
+    for date in dates:
+        row = role_group_by_date.get(date) or {
+            "date": date,
+            "roleGroup": 0,
+            "total": 0,
+            "payrollRoleGroup": 0.0,
+            "payrollTotal": 0.0,
+        }
+        points.append({
+            "date": date,
+            "roleGroup": row["roleGroup"],
+            "total": row["total"],
+            "payrollRoleGroup": row["payrollRoleGroup"],
+            "payrollTotal": row["payrollTotal"],
+            "headcountSharePct": safe_pct(row["roleGroup"], row["total"]),
+            "payrollSharePct": safe_pct(row["payrollRoleGroup"], row["payrollTotal"]),
+        })
+    return {
+        "methodology": {
+            "includeTerms": ROLE_GROUP_INCLUDE_TERMS,
+            "excludeTerms": ROLE_GROUP_EXCLUDE_TERMS,
+        },
+        "points": points,
+    }
+
+
+def build_artifacts(data):
     index = {}
     buckets = defaultdict(dict)
     snap_pay_map = {}
@@ -152,6 +456,19 @@ def main():
     peer_buckets = defaultdict(lambda: defaultdict(list))
     class_transitions = {}
     search_index = []
+    pay_values_by_date = defaultdict(list)
+    pay_values_by_date_class = defaultdict(lambda: {
+        "classified": [],
+        "unclassified": [],
+        "overall": [],
+    })
+    tenure_by_date = defaultdict(empty_tenure_row)
+    role_group_by_date = defaultdict(lambda: {
+        "roleGroup": 0,
+        "total": 0,
+        "payrollRoleGroup": 0.0,
+        "payrollTotal": 0.0,
+    })
 
     latest_class_date = ""
     latest_unclass_date = ""
@@ -178,6 +495,7 @@ def main():
         was_excluded = False
         first_exclusion_date = None
         started_classified = None  # track initial classification
+        hire_date = get_person_hire_date(person)
         for idx, snap in enumerate(timeline):
             date = snap.get("Date")
             if date:
@@ -185,6 +503,7 @@ def main():
 
             src = (snap.get("Source") or "").lower()
             is_unclass = "unclass" in src
+            class_state = class_state_from_source(src)
             if started_classified is None:
                 started_classified = not is_unclass  # True if first snapshot is classified
 
@@ -230,6 +549,24 @@ def main():
                 else:
                     entry["classified"] += 1
                     entry["payrollClassified"] += snap_pay
+
+                if snap_pay > 0:
+                    pay_values_by_date[date].append(snap_pay)
+                    pay_values_by_date_class[date]["overall"].append(snap_pay)
+                    if class_state in ("classified", "unclassified"):
+                        pay_values_by_date_class[date][class_state].append(snap_pay)
+
+                tenure_band = tenure_band_for_dates(hire_date, date)
+                if tenure_band:
+                    add_tenure_count(tenure_by_date[date], class_state, tenure_band)
+
+                if jobs:
+                    role_entry = role_group_by_date[date]
+                    role_entry["total"] += 1
+                    role_entry["payrollTotal"] += snap_pay
+                    if is_role_group_snapshot(jobs):
+                        role_entry["roleGroup"] += 1
+                        role_entry["payrollRoleGroup"] += snap_pay
 
                 primary_job = jobs[0] if jobs else None
                 if primary_job:
@@ -433,27 +770,78 @@ def main():
         "latestUnclassDate": latest_unclass_date,
         "snapshotDates": snapshot_dates_sorted,
         "historyStats": history_stats,
+        "pairedHistoryStats": build_paired_history_stats(history_stats),
         "classTransitions": class_transitions_sorted,
-        "peerMedianMap": peer_median_map,
+        "peerMedianUrl": "data/peer-medians.json",
+        "payConcentration": build_pay_concentration_points(snapshot_dates_sorted, pay_values_by_date),
+        "payDistribution": build_pay_distribution_points(snapshot_dates_sorted, pay_values_by_date_class),
+        "tenureMix": build_tenure_mix_points(snapshot_dates_sorted, tenure_by_date),
+        "roleGroupConcentration": build_role_group_concentration_points(snapshot_dates_sorted, role_group_by_date),
         "allRoles": sorted(all_roles),
     }
 
-    with open(INDEX_PATH, "w", encoding="utf-8") as f:
-        json.dump(index, f, ensure_ascii=False)
-    with open(AGG_PATH, "w", encoding="utf-8") as f:
-        json.dump(aggregates, f, ensure_ascii=False)
-    with open(SEARCH_INDEX_PATH, "w", encoding="utf-8") as f:
-        json.dump({"records": search_index}, f, ensure_ascii=False)
+    return {
+        "index": index,
+        "aggregates": aggregates,
+        "searchIndex": search_index,
+        "buckets": buckets,
+        "peerMedianMap": peer_median_map,
+    }
 
-    for bucket, bucket_data in buckets.items():
+
+def write_artifacts(artifacts):
+    os.makedirs(PEOPLE_DIR, exist_ok=True)
+
+    with open(INDEX_PATH, "w", encoding="utf-8") as f:
+        json.dump(artifacts["index"], f, ensure_ascii=False)
+    with open(AGG_PATH, "w", encoding="utf-8") as f:
+        json.dump(artifacts["aggregates"], f, ensure_ascii=False)
+    with open(SEARCH_INDEX_PATH, "w", encoding="utf-8") as f:
+        json.dump({"records": artifacts["searchIndex"]}, f, ensure_ascii=False)
+    with open(PEER_MEDIAN_PATH, "w", encoding="utf-8") as f:
+        json.dump(artifacts["peerMedianMap"], f, ensure_ascii=False)
+
+    for bucket, bucket_data in artifacts["buckets"].items():
         out_path = os.path.join(PEOPLE_DIR, f"{bucket}.json")
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(bucket_data, f, ensure_ascii=False)
 
     print(f"Wrote index: {INDEX_PATH}")
     print(f"Wrote aggregates: {AGG_PATH}")
+    print(f"Wrote peer medians: {PEER_MEDIAN_PATH}")
     print(f"Wrote search index: {SEARCH_INDEX_PATH}")
-    print(f"Wrote {len(buckets)} bucket files in {PEOPLE_DIR}")
+    print(f"Wrote {len(artifacts['buckets'])} bucket files in {PEOPLE_DIR}")
+
+
+def load_data_from_args(args):
+    if args.from_reports:
+        from scripts.salary_report_parser import parse_reports
+        return parse_reports(text_dir=args.text_dir, html_dir=args.html_dir)
+
+    if not os.path.exists(args.input):
+        raise SystemExit(f"Missing {args.input}. Run convert_data.sh first.")
+    with open(args.input, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="Build static-site data artifacts.")
+    parser.add_argument("--input", default=RAW_PATH, help="Raw data JSON to read when not parsing reports.")
+    parser.add_argument("--from-reports", action="store_true", help="Parse temp text and HTML reports directly.")
+    parser.add_argument("--text-dir", default="temp_txt", help="Directory containing pdftotext output.")
+    parser.add_argument("--html-dir", default="html_reports", help="Directory containing classified HTML snapshots.")
+    parser.add_argument("--write-raw-data", metavar="PATH", help="Optionally write parsed raw JSON while building artifacts.")
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    data = load_data_from_args(args)
+    if args.write_raw_data:
+        with open(args.write_raw_data, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        print(f"Wrote raw data: {args.write_raw_data}")
+    write_artifacts(build_artifacts(data))
 
 
 if __name__ == "__main__":

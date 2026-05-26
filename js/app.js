@@ -42,6 +42,7 @@ const COLA_EVENTS = [
 const DATA_INDEX_URL = 'data/index.json';
 const DATA_AGG_URL = 'data/aggregates.json';
 const DATA_SEARCH_URL = 'data/search-index.json';
+const DATA_PEER_MEDIANS_URL = 'data/peer-medians.json';
 const DATA_BUCKET_DIR = 'data/people';
 const SEARCH_ANALYTICS_MAX_QUERY_LEN = 120;
 const SEARCH_EVENT_MIN_INTERVAL_MS = 1200;
@@ -207,6 +208,32 @@ const loadBucket = (bucket) => {
             delete state.bucketPromises[bucket];
         });
     return state.bucketPromises[bucket];
+};
+
+const loadPeerMedians = () => {
+    if (state.peerMedianMap) return Promise.resolve(state.peerMedianMap);
+    if (state.peerMedianPromise) return state.peerMedianPromise;
+    const url = state.peerMedianUrl || DATA_PEER_MEDIANS_URL;
+    state.peerMedianPromise = fetch(url)
+        .then(res => {
+            if (!res.ok) throw new Error(`Failed to load ${url}`);
+            return res.json();
+        })
+        .then(data => {
+            state.peerMedianMap = data || {};
+            state.peerMedianLoadFailed = false;
+            return state.peerMedianMap;
+        })
+        .catch(err => {
+            console.error('Failed to load peer medians', err);
+            state.peerMedianMap = {};
+            state.peerMedianLoadFailed = true;
+            return state.peerMedianMap;
+        })
+        .finally(() => {
+            state.peerMedianPromise = null;
+        });
+    return state.peerMedianPromise;
 };
 
 const forEachWithConcurrency = (items, concurrency, iteratee) => {
@@ -822,7 +849,8 @@ const initSearchWorker = (force = false) => {
         const worker = createSearchWorker();
         state.searchWorkerInitInFlight = true;
         const initId = `init:${Date.now()}:${++state.searchRequestSeq}`;
-        worker.postMessage({ type: 'init', id: initId, payload: { url: DATA_SEARCH_URL } });
+        const searchIndexUrl = new URL(DATA_SEARCH_URL, window.location.href).toString();
+        worker.postMessage({ type: 'init', id: initId, payload: { url: searchIndexUrl } });
         return true;
     } catch (err) {
         state.searchWorkerErrored = true;
@@ -1117,7 +1145,11 @@ const state = {
     latestClassDate: "",
     latestUnclassDate: "",
     snapshotDates: [],
-    peerMedianMap: {},
+    pairedHistoryStats: [],
+    peerMedianMap: null,
+    peerMedianUrl: DATA_PEER_MEDIANS_URL,
+    peerMedianPromise: null,
+    peerMedianLoadFailed: false,
     keyBuckets: {},
     personCharts: {},
     detailCache: {},
@@ -1156,12 +1188,10 @@ const state = {
     historicalAdvancedRendered: false,
     historicalFullscreenEventsBound: false,
     historicalPseudoFullscreenCard: null,
-    upperMiddleMetrics: null,
-    upperMiddleMetricsPromise: null,
+    roleGroupConcentration: null,
+    payConcentrationMetrics: null,
     payDistributionMetrics: null,
-    payDistributionMetricsPromise: null,
     tenureMixMetrics: null,
-    tenureMixMetricsPromise: null,
     analytics: {
         nextSearchSource: 'unknown',
         lastSearchSignature: '',
@@ -1370,8 +1400,14 @@ Promise.all([
         state.latestUnclassDate = aggregates.latestUnclassDate || "";
         state.snapshotDates = aggregates.snapshotDates || [];
         state.historyStats = aggregates.historyStats || [];
+        state.pairedHistoryStats = aggregates.pairedHistoryStats || [];
         state.classTransitions = aggregates.classTransitions || [];
-        state.peerMedianMap = aggregates.peerMedianMap || {};
+        state.peerMedianMap = aggregates.peerMedianMap || null;
+        state.peerMedianUrl = aggregates.peerMedianUrl || DATA_PEER_MEDIANS_URL;
+        state.payConcentrationMetrics = aggregates.payConcentration || null;
+        state.payDistributionMetrics = aggregates.payDistribution || null;
+        state.tenureMixMetrics = aggregates.tenureMix || null;
+        state.roleGroupConcentration = aggregates.roleGroupConcentration || null;
 
         // Preload exclusion transition map when dates are already present in index.
         state.exclusionTransitionMap = {};
@@ -1497,251 +1533,16 @@ function computeTenureShares(counts, total) {
 // HISTORICAL_TENURE_HELPERS_END
 
 function loadUpperMiddleManagementMetrics() {
-    if (state.upperMiddleMetrics) return Promise.resolve(state.upperMiddleMetrics);
-    if (state.upperMiddleMetricsPromise) return state.upperMiddleMetricsPromise;
-
-    const includeRe = /(associate director|assistant director|senior director|director|manager|head|chair)/i;
-    const excludeRe = /(vice president|provost|chancellor|president|chief|dean)/i;
-    const dates = state.snapshotDates || [];
-    const byDate = {};
-    for (let i = 0; i < dates.length; i++) {
-        byDate[dates[i]] = { date: dates[i], upper: 0, total: 0, payrollUpper: 0, payrollTotal: 0 };
-    }
-
-    const buckets = getUniqueBuckets(state.masterKeys);
-    state.upperMiddleMetricsPromise = forEachWithConcurrency(buckets, 6, (bucket) => {
-        return loadBucket(bucket).then(bucketData => {
-            if (!bucketData) return;
-            for (const key in bucketData) {
-                const person = bucketData[key];
-                if (!person || !person.Timeline) continue;
-                hydratePersonDetail(person);
-                for (let i = 0; i < person.Timeline.length; i++) {
-                    const snap = person.Timeline[i];
-                    if (!snap || !snap.Date || !byDate[snap.Date]) continue;
-                    const entry = byDate[snap.Date];
-                    const jobs = snap.Jobs || [];
-                    if (jobs.length === 0) continue;
-                    const titles = jobs.map(job => (job['Job Title'] || '')).join(' | ');
-                    const isUpper = includeRe.test(titles) && !excludeRe.test(titles);
-                    const pay = snap._pay !== undefined ? snap._pay : calculateSnapshotPay(snap);
-                    entry.total += 1;
-                    entry.payrollTotal += pay;
-                    if (isUpper) {
-                        entry.upper += 1;
-                        entry.payrollUpper += pay;
-                    }
-                }
-            }
-        });
-    })
-        .then(() => {
-            const len = dates.length;
-            const points = new Array(len);
-            for (let i = 0; i < len; i++) {
-                const date = dates[i];
-                const row = byDate[date] || { upper: 0, total: 0, payrollUpper: 0, payrollTotal: 0 };
-                const headcountSharePct = row.total > 0 ? (row.upper / row.total) * 100 : null;
-                const payrollSharePct = row.payrollTotal > 0 ? (row.payrollUpper / row.payrollTotal) * 100 : null;
-                points[i] = {
-                    date,
-                    upper: row.upper,
-                    total: row.total,
-                    payrollUpper: row.payrollUpper,
-                    payrollTotal: row.payrollTotal,
-                    headcountSharePct,
-                    payrollSharePct
-                };
-            }
-            state.upperMiddleMetrics = { points };
-            return state.upperMiddleMetrics;
-        })
-        .catch(err => {
-            state.upperMiddleMetrics = null;
-            throw err;
-        })
-        .finally(() => {
-            state.upperMiddleMetricsPromise = null;
-        });
-
-    return state.upperMiddleMetricsPromise;
+    const metrics = state.roleGroupConcentration || { points: [], methodology: {} };
+    return Promise.resolve(metrics);
 }
 
 function loadPayDistributionMetrics() {
-    if (state.payDistributionMetrics) return Promise.resolve(state.payDistributionMetrics);
-    if (state.payDistributionMetricsPromise) return state.payDistributionMetricsPromise;
-
-    const dates = state.snapshotDates || [];
-    const byDate = {};
-    for (let i = 0; i < dates.length; i++) {
-        byDate[dates[i]] = { classPays: [], unclassPays: [] };
-    }
-
-    const buckets = getUniqueBuckets(state.masterKeys);
-    state.payDistributionMetricsPromise = forEachWithConcurrency(buckets, 6, (bucket) => {
-        return loadBucket(bucket).then(bucketData => {
-            if (!bucketData) return;
-            for (const name in bucketData) {
-                const person = bucketData[name];
-                if (!person || !person.Timeline) continue;
-                hydratePersonDetail(person);
-                for (let i = 0; i < person.Timeline.length; i++) {
-                    const snap = person.Timeline[i];
-                    if (!snap || !snap.Date || !byDate[snap.Date]) continue;
-                    const pay = snap._pay !== undefined ? snap._pay : calculateSnapshotPay(snap);
-                    const classState = getClassStateFromSource(snap.Source);
-                    if (classState === 'unclassified') {
-                        byDate[snap.Date].unclassPays.push(pay);
-                    } else if (classState === 'classified') {
-                        byDate[snap.Date].classPays.push(pay);
-                    }
-                }
-            }
-        });
-    })
-        .then(() => {
-            const len = dates.length;
-            const points = new Array(len);
-            for (let i = 0; i < len; i++) {
-                const date = dates[i];
-                const entry = byDate[date] || { classPays: [], unclassPays: [] };
-                points[i] = {
-                    date,
-                    pct10Class: quantileValue(entry.classPays, 0.1),
-                    pct50Class: quantileValue(entry.classPays, 0.5),
-                    pct90Class: quantileValue(entry.classPays, 0.9),
-                    pct10Unclass: quantileValue(entry.unclassPays, 0.1),
-                    pct50Unclass: quantileValue(entry.unclassPays, 0.5),
-                    pct90Unclass: quantileValue(entry.unclassPays, 0.9)
-                };
-            }
-            state.payDistributionMetrics = { points };
-            return state.payDistributionMetrics;
-        })
-        .catch(err => {
-            state.payDistributionMetrics = null;
-            throw err;
-        })
-        .finally(() => {
-            state.payDistributionMetricsPromise = null;
-        });
-
-    return state.payDistributionMetricsPromise;
+    return Promise.resolve(state.payDistributionMetrics || { points: [] });
 }
 
 function loadTenureMixMetrics() {
-    if (state.tenureMixMetrics) return Promise.resolve(state.tenureMixMetrics);
-    if (state.tenureMixMetricsPromise) return state.tenureMixMetricsPromise;
-
-    const parseDateToTs = (str) => {
-        if (!str) return 0;
-        const direct = new Date(str).getTime();
-        if (!Number.isNaN(direct) && direct > 0) return direct;
-        const match = /^(\d{2})-([A-Za-z]{3})-(\d{4})$/.exec(str.trim());
-        if (match) {
-            const day = Number.parseInt(match[1], 10);
-            const mon = match[2].toUpperCase();
-            const year = Number.parseInt(match[3], 10);
-            const months = { JAN:0, FEB:1, MAR:2, APR:3, MAY:4, JUN:5, JUL:6, AUG:7, SEP:8, OCT:9, NOV:10, DEC:11 };
-            const monthIdx = months[mon];
-            if (monthIdx !== undefined) {
-                const ts = Date.UTC(year, monthIdx, day);
-                return Number.isNaN(ts) ? 0 : ts;
-            }
-        }
-        return 0;
-    };
-
-    const getPersonHireTs = (person) => {
-        if (person._hiredDateTs && person._hiredDateTs > 0) return person._hiredDateTs;
-        let best = 0;
-        const timeline = person.Timeline || [];
-        for (let i = 0; i < timeline.length; i++) {
-            const snap = timeline[i];
-            const metaHire = snap?.SnapshotDetails?.['First Hired'] || '';
-            const metaTs = parseDateToTs(metaHire);
-            if (metaTs && (best === 0 || metaTs < best)) best = metaTs;
-            const snapTs = parseDateToTs(snap.Date);
-            if (snapTs && (best === 0 || snapTs < best)) best = snapTs;
-        }
-        return best;
-    };
-
-    const dates = state.snapshotDates || [];
-    const byDate = {};
-    for (let i = 0; i < dates.length; i++) {
-        byDate[dates[i]] = {
-            classified: { counts: { lt3: 0, threeTo7: 0, sevenTo15: 0, fifteenPlus: 0 }, total: 0 },
-            unclassified: { counts: { lt3: 0, threeTo7: 0, sevenTo15: 0, fifteenPlus: 0 }, total: 0 },
-            overall: { counts: { lt3: 0, threeTo7: 0, sevenTo15: 0, fifteenPlus: 0 }, total: 0 }
-        };
-    }
-
-    const MS_PER_YEAR = 1000 * 60 * 60 * 24 * 365.25;
-    const buckets = getUniqueBuckets(state.masterKeys);
-
-    state.tenureMixMetricsPromise = forEachWithConcurrency(buckets, 6, (bucket) => {
-        return loadBucket(bucket).then(bucketData => {
-            if (!bucketData) return;
-            for (const name in bucketData) {
-                const person = bucketData[name];
-                if (!person || !person.Timeline) continue;
-                hydratePersonDetail(person);
-                const hiredTs = getPersonHireTs(person);
-                if (!hiredTs) continue; // skip unknown hire dates
-                for (let i = 0; i < person.Timeline.length; i++) {
-                    const snap = person.Timeline[i];
-                    if (!snap || !snap.Date || !byDate[snap.Date]) continue;
-                    const snapTs = parseDateToTs(snap.Date);
-                    if (Number.isNaN(snapTs) || snapTs <= 0) continue;
-                    const tenureYears = (snapTs - hiredTs) / MS_PER_YEAR;
-                    if (tenureYears < 0) continue;
-                    let band = 'lt3';
-                    if (tenureYears >= 15) band = 'fifteenPlus';
-                    else if (tenureYears >= 7) band = 'sevenTo15';
-                    else if (tenureYears >= 3) band = 'threeTo7';
-
-                    const classState = getClassStateFromSource(snap.Source);
-                    const bucketObj = classState === 'unclassified'
-                        ? byDate[snap.Date].unclassified
-                        : byDate[snap.Date].classified;
-
-                    bucketObj.counts[band] += 1;
-                    bucketObj.total += 1;
-                    byDate[snap.Date].overall.counts[band] += 1;
-                    byDate[snap.Date].overall.total += 1;
-                }
-            }
-        });
-    })
-        .then(() => {
-            const len = dates.length;
-            const points = new Array(len);
-            for (let i = 0; i < len; i++) {
-                const date = dates[i];
-                const row = byDate[date];
-                const classifiedShares = computeTenureShares(row.classified.counts, row.classified.total);
-                const unclassifiedShares = computeTenureShares(row.unclassified.counts, row.unclassified.total);
-                const overallShares = computeTenureShares(row.overall.counts, row.overall.total);
-                points[i] = {
-                    date,
-                    classified: { counts: row.classified.counts, shares: classifiedShares, total: row.classified.total },
-                    unclassified: { counts: row.unclassified.counts, shares: unclassifiedShares, total: row.unclassified.total },
-                    overall: { counts: row.overall.counts, shares: overallShares, total: row.overall.total }
-                };
-            }
-            state.tenureMixMetrics = { points };
-            return state.tenureMixMetrics;
-        })
-        .catch(err => {
-            state.tenureMixMetrics = null;
-            throw err;
-        })
-        .finally(() => {
-            state.tenureMixMetricsPromise = null;
-        });
-
-    return state.tenureMixMetricsPromise;
+    return Promise.resolve(state.tenureMixMetrics || { points: [] });
 }
 
 function resizeHistoricalCharts() {
@@ -1999,7 +1800,14 @@ function renderInteractiveCharts(history) {
     try {
         destroyHistoricalCharts();
 
-        const metrics = buildHistoricalLaborMetrics(history, state.classTransitions || []);
+        const comparisonHistory = (state.pairedHistoryStats && state.pairedHistoryStats.length)
+            ? state.pairedHistoryStats
+            : history;
+        const metrics = buildHistoricalLaborMetrics(comparisonHistory, state.classTransitions || []);
+        const exactMetrics = comparisonHistory === history
+            ? metrics
+            : buildHistoricalLaborMetrics(history, []);
+        const exactByDate = new Map((exactMetrics.points || []).map(point => [point.date, point]));
         const points = metrics.points || [];
         const latest = metrics.latest || null;
         const kpis = metrics.kpis || {};
@@ -2025,22 +1833,23 @@ function renderInteractiveCharts(history) {
 
         for (let i = 0; i < len; i++) {
             const point = points[i];
+            const exactPoint = exactByDate.get(point.date);
             labels[i] = point.date;
             classifiedHeadcounts[i] = point.classified;
             unclassifiedHeadcounts[i] = point.unclassified;
-            totalHeadcounts[i] = point.totalHeadcount;
+            totalHeadcounts[i] = exactPoint ? exactPoint.totalHeadcount : point.totalHeadcount;
             classifiedPayroll[i] = point.payrollClassified;
             unclassifiedPayroll[i] = point.payrollUnclassified;
-            totalPayroll[i] = point.payrollTotal;
+            totalPayroll[i] = exactPoint ? exactPoint.payrollTotal : point.payrollTotal;
             perCapitaClassified[i] = point.perCapitaClassified;
             perCapitaUnclassified[i] = point.perCapitaUnclassified;
-            perCapitaAll[i] = point.perCapitaAll;
+            perCapitaAll[i] = exactPoint ? exactPoint.perCapitaAll : point.perCapitaAll;
         }
 
         container.innerHTML = `
         <div class="historical-warning">
             <span class="historical-warning-icon">⚠️</span>
-            <span><strong>Data Incomplete:</strong> Historical charts are based on partial records; missing snapshots can skew trends and totals.</span>
+            <span><strong>Data Incomplete:</strong> Cross-classification comparisons use nearest prior paired reports within 120 days; exact snapshot totals can still reflect missing same-day reports.</span>
         </div>
         <div id="historical-kpi-strip" class="historical-kpi-strip">
             <div class="historical-kpi">
@@ -2356,21 +2165,30 @@ function renderInteractiveCharts(history) {
                 </div>
                 <div class="stat-card historical-card">
                     <div class="chart-title-row">
-                        <div class="stat-label">Upper-Middle Management Expansion</div>
-                        <span class="chart-info-icon help-cursor" data-tooltip="Tracks the number and share of roles with upper-middle management style titles across snapshots using a title heuristic (includes: director/manager/head/chair; excludes: vice president/provost/chancellor/president/chief/dean)." aria-label="Chart explainer: Upper-Middle Management Expansion" tabindex="0">i</span>
+                        <div class="stat-label">Pay Concentration</div>
+                        <span class="chart-info-icon help-cursor" data-tooltip="Tracks how much total payroll sits in the top 1%, 5%, and 10% of paid records per snapshot. Ratios compare P90/P50 and P50/P10 pay levels." aria-label="Chart explainer: Pay Concentration" tabindex="0">i</span>
                     </div>
-                    <button type="button" class="chart-fullscreen-btn" data-canvas-id="chart-upper-mgmt" aria-label="View Upper-Middle Management Expansion in fullscreen">⛶</button>
-                    <div class="historical-canvas-wrap"><canvas id="chart-upper-mgmt"></canvas></div>
-                    <div class="stat-sub" id="upper-mgmt-status">Loading upper-middle management trend from detailed buckets...</div>
+                    <button type="button" class="chart-fullscreen-btn" data-canvas-id="chart-pay-concentration" aria-label="View Pay Concentration in fullscreen">⛶</button>
+                    <div class="historical-canvas-wrap"><canvas id="chart-pay-concentration"></canvas></div>
+                    <div class="stat-sub" id="pay-concentration-status">Payroll share held by top-paid records.</div>
                 </div>
                 <div class="stat-card historical-card">
                     <div class="chart-title-row">
-                        <div class="stat-label">Upper-Middle Payroll vs Headcount Share</div>
-                        <span class="chart-info-icon help-cursor" data-tooltip="Compares upper-middle roles’ share of total headcount versus their share of payroll using the same title heuristic. Spread line shows payroll share minus headcount share; positive spread means payroll is growing faster than their numbers." aria-label="Chart explainer: Upper-Middle Payroll vs Headcount Share" tabindex="0">i</span>
+                        <div class="stat-label">Role Group Concentration</div>
+                        <span class="chart-info-icon help-cursor" data-tooltip="Tracks the number and share of roles matching a transparent title heuristic: includes director/manager/head/chair terms and excludes vice president/provost/chancellor/president/chief/dean terms." aria-label="Chart explainer: Role Group Concentration" tabindex="0">i</span>
                     </div>
-                    <button type="button" class="chart-fullscreen-btn" data-canvas-id="chart-upper-mgmt-share" aria-label="View Upper-Middle Payroll vs Headcount Share in fullscreen">⛶</button>
-                    <div class="historical-canvas-wrap"><canvas id="chart-upper-mgmt-share"></canvas></div>
-                    <div class="stat-sub" id="upper-mgmt-share-status">Loading upper-middle share comparison...</div>
+                    <button type="button" class="chart-fullscreen-btn" data-canvas-id="chart-role-group" aria-label="View Role Group Concentration in fullscreen">⛶</button>
+                    <div class="historical-canvas-wrap"><canvas id="chart-role-group"></canvas></div>
+                    <div class="stat-sub" id="role-group-status">Title heuristic trend from generated aggregates.</div>
+                </div>
+                <div class="stat-card historical-card">
+                    <div class="chart-title-row">
+                        <div class="stat-label">Role Group Payroll vs Headcount Share</div>
+                        <span class="chart-info-icon help-cursor" data-tooltip="Compares this role group's share of total headcount versus its share of payroll using the same title heuristic. Spread line shows payroll share minus headcount share." aria-label="Chart explainer: Role Group Payroll vs Headcount Share" tabindex="0">i</span>
+                    </div>
+                    <button type="button" class="chart-fullscreen-btn" data-canvas-id="chart-role-group-share" aria-label="View Role Group Payroll vs Headcount Share in fullscreen">⛶</button>
+                    <div class="historical-canvas-wrap"><canvas id="chart-role-group-share"></canvas></div>
+                    <div class="stat-sub" id="role-group-share-status">Headcount vs payroll share with spread line.</div>
                 </div>
                 <div class="stat-card historical-card">
                     <div class="chart-title-row">
@@ -2542,38 +2360,128 @@ function renderInteractiveCharts(history) {
             }
         }));
 
-        loadUpperMiddleManagementMetrics()
-            .then((upperMetrics) => {
-                const upperPoints = (upperMetrics && upperMetrics.points) ? upperMetrics.points : [];
-                const upperLabels = [];
-                const upperCount = [];
-                const upperShare = [];
-                const upperPayrollShare = [];
-                const upperSpread = [];
-
-                for (let i = 0; i < upperPoints.length; i++) {
-                    const point = upperPoints[i];
-                    upperLabels.push(point.date);
-                    upperCount.push(point.upper);
-                    upperShare.push(point.headcountSharePct);
-                    upperPayrollShare.push(point.payrollSharePct);
-                    if (point.payrollSharePct === null || point.headcountSharePct === null) {
-                        upperSpread.push(null);
-                    } else {
-                        upperSpread.push(point.payrollSharePct - point.headcountSharePct);
+        const concentrationMetrics = state.payConcentrationMetrics || { points: [] };
+        const concentrationPoints = concentrationMetrics.points || [];
+        const concentrationLabels = concentrationPoints.map(point => point.date);
+        const concentrationStatus = document.getElementById('pay-concentration-status');
+        if (concentrationStatus) {
+            concentrationStatus.textContent = concentrationPoints.length
+                ? 'Top payroll shares and spread ratios from generated aggregates.'
+                : 'No pay concentration data.';
+        }
+        registerHistoricalChart('payConcentration', new Chart(document.getElementById('chart-pay-concentration').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: concentrationLabels,
+                datasets: [
+                    {
+                        label: 'Top 1% Payroll Share',
+                        data: concentrationPoints.map(p => p.top1SharePct),
+                        borderColor: '#f97316',
+                        backgroundColor: 'rgba(249, 115, 22, 0.12)',
+                        fill: false,
+                        tension: 0.2,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'Top 5% Payroll Share',
+                        data: concentrationPoints.map(p => p.top5SharePct),
+                        borderColor: '#fbbf24',
+                        backgroundColor: 'rgba(251, 191, 36, 0.12)',
+                        fill: false,
+                        tension: 0.2,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'Top 10% Payroll Share',
+                        data: concentrationPoints.map(p => p.top10SharePct),
+                        borderColor: '#22c55e',
+                        backgroundColor: 'rgba(34, 197, 94, 0.12)',
+                        fill: false,
+                        tension: 0.2,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'P90 / P50',
+                        data: concentrationPoints.map(p => p.p90P50Ratio),
+                        borderColor: '#60a5fa',
+                        borderDash: [6, 4],
+                        fill: false,
+                        tension: 0.2,
+                        yAxisID: 'y1'
+                    },
+                    {
+                        label: 'P50 / P10',
+                        data: concentrationPoints.map(p => p.p50P10Ratio),
+                        borderColor: '#a78bfa',
+                        borderDash: [2, 4],
+                        fill: false,
+                        tension: 0.2,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                ...getChartOptions({
+                    yTickCallback: (value) => `${Number(value).toFixed(0)}%`,
+                    animation: false,
+                    xTickLimit: 8,
+                    legend: true
+                }),
+                scales: {
+                    x: { ticks: { color: '#888' }, grid: { color: '#333' } },
+                    y: {
+                        ticks: { color: '#888', callback: (value) => `${Number(value).toFixed(0)}%` },
+                        grid: { color: '#333' }
+                    },
+                    y1: {
+                        position: 'right',
+                        ticks: { color: '#888', callback: (value) => `${Number(value).toFixed(2)}x` },
+                        grid: { drawOnChartArea: false, color: '#333' }
                     }
                 }
-                const statusEl = document.getElementById('upper-mgmt-status');
-                if (statusEl) statusEl.textContent = 'Upper-middle title trend from detailed per-snapshot role heuristics.';
+            }
+        }));
 
-                registerHistoricalChart('upperManagement', new Chart(document.getElementById('chart-upper-mgmt').getContext('2d'), {
+        loadUpperMiddleManagementMetrics()
+            .then((roleMetrics) => {
+                const rolePoints = (roleMetrics && roleMetrics.points) ? roleMetrics.points : [];
+                const roleLabels = [];
+                const roleCount = [];
+                const roleShare = [];
+                const rolePayrollShare = [];
+                const roleSpread = [];
+
+                for (let i = 0; i < rolePoints.length; i++) {
+                    const point = rolePoints[i];
+                    roleLabels.push(point.date);
+                    roleCount.push(point.roleGroup ?? point.upper ?? 0);
+                    roleShare.push(point.headcountSharePct);
+                    rolePayrollShare.push(point.payrollSharePct);
+                    if (point.payrollSharePct === null || point.headcountSharePct === null) {
+                        roleSpread.push(null);
+                    } else {
+                        roleSpread.push(point.payrollSharePct - point.headcountSharePct);
+                    }
+                }
+                const methodology = (roleMetrics && roleMetrics.methodology) ? roleMetrics.methodology : {};
+                const statusEl = document.getElementById('role-group-status');
+                if (statusEl) {
+                    const includes = (methodology.includeTerms || []).join(', ');
+                    const excludes = (methodology.excludeTerms || []).join(', ');
+                    statusEl.textContent = includes || excludes
+                        ? `Title heuristic includes: ${includes}; excludes: ${excludes}.`
+                        : 'Title heuristic trend from generated aggregates.';
+                }
+
+                registerHistoricalChart('roleGroup', new Chart(document.getElementById('chart-role-group').getContext('2d'), {
                     type: 'line',
                     data: {
-                        labels: upperLabels,
+                        labels: roleLabels,
                         datasets: [
                             {
-                                label: 'Upper-Middle Headcount',
-                                data: upperCount,
+                                label: 'Role Group Headcount',
+                                data: roleCount,
                                 borderColor: '#34d399',
                                 backgroundColor: 'rgba(52, 211, 153, 0.14)',
                                 fill: true,
@@ -2582,7 +2490,7 @@ function renderInteractiveCharts(history) {
                             },
                             {
                                 label: 'Share of Headcount',
-                                data: upperShare,
+                                data: roleShare,
                                 borderColor: '#a78bfa',
                                 fill: false,
                                 tension: 0.2,
@@ -2611,17 +2519,17 @@ function renderInteractiveCharts(history) {
                     }
                 }));
 
-                const shareStatus = document.getElementById('upper-mgmt-share-status');
+                const shareStatus = document.getElementById('role-group-share-status');
                 if (shareStatus) shareStatus.textContent = 'Headcount vs payroll share with spread line.';
 
-                registerHistoricalChart('upperManagementShare', new Chart(document.getElementById('chart-upper-mgmt-share').getContext('2d'), {
+                registerHistoricalChart('roleGroupShare', new Chart(document.getElementById('chart-role-group-share').getContext('2d'), {
                     type: 'line',
                     data: {
-                        labels: upperLabels,
+                        labels: roleLabels,
                         datasets: [
                             {
                                 label: 'Headcount Share',
-                                data: upperShare,
+                                data: roleShare,
                                 borderColor: '#60a5fa',
                                 backgroundColor: 'rgba(96, 165, 250, 0.12)',
                                 fill: false,
@@ -2630,7 +2538,7 @@ function renderInteractiveCharts(history) {
                             },
                             {
                                 label: 'Payroll Share',
-                                data: upperPayrollShare,
+                                data: rolePayrollShare,
                                 borderColor: '#f59e0b',
                                 backgroundColor: 'rgba(245, 158, 11, 0.12)',
                                 fill: false,
@@ -2639,7 +2547,7 @@ function renderInteractiveCharts(history) {
                             },
                             {
                                 label: 'Spread (Payroll - Headcount)',
-                                data: upperSpread,
+                                data: roleSpread,
                                 borderColor: '#a78bfa',
                                 borderDash: [6, 4],
                                 fill: false,
@@ -2658,12 +2566,12 @@ function renderInteractiveCharts(history) {
                 }));
             })
             .catch((err) => {
-                const statusEl = document.getElementById('upper-mgmt-status');
+                const statusEl = document.getElementById('role-group-status');
                 if (statusEl) {
-                    statusEl.textContent = 'Could not compute upper-middle management trend from bucket data.';
+                    statusEl.textContent = 'Could not load role group trend from generated aggregates.';
                     statusEl.classList.add('status-error');
                 }
-                console.error('Upper-middle management chart failed', err);
+                console.error('Role group chart failed', err);
             });
 
         loadPayDistributionMetrics()
@@ -2953,6 +2861,11 @@ function ensurePersonChart(cardEl) {
 
     const yearsDiff = getTimelineYears(person.Timeline);
     if (yearsDiff < MIN_TREND_YEARS) return;
+
+    if (!state.peerMedianMap) {
+        loadPeerMedians().then(() => ensurePersonChart(cardEl));
+        return;
+    }
 
     const inflationSelect = cardEl.querySelector('.trend-mode');
     const gapToggle = cardEl.querySelector('.gap-toggle-input');
