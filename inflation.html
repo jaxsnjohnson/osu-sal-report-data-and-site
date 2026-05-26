@@ -142,10 +142,20 @@
             return;
         }
 
+        const escapeHtml = (str) => {
+            if (!str) return '';
+            return str.toString()
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        };
+
         rowsEl.innerHTML = months.map(month => {
             const value = map[month];
             const rowClass = month === base ? 'base-row' : '';
-            return `<tr class="${rowClass}"><td>${month}</td><td>${value.toFixed(3)}</td></tr>`;
+            return `<tr class="${rowClass}"><td>${escapeHtml(month)}</td><td>${value.toFixed(3)}</td></tr>`;
         }).join('');
     })();
 </script>
