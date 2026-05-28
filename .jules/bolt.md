@@ -53,3 +53,7 @@
 ## 2026-05-18 - Optimize Analytics Aggregations and Top-K Selection
 **Learning:** `calculateStats` was heavily utilized during search filtering. Creating frequency maps via raw JavaScript objects (`{}`) incurs prototype overhead. Additionally, flattening these objects into arrays with `Object.entries()` followed by a complete `Array.prototype.sort()` to extract only the top 4 or 5 items results in unneeded O(N log N) overhead and memory allocations.
 **Action:** Use ES6 `Map`s for high-frequency tracking (e.g., role counts). Replace `Array.sort().slice(0, K)` with an O(N) top-K linear scan function when `K` is small (like 4 or 5) to dramatically reduce sorting time and intermediate array allocations.
+
+## 2026-05-18 - String Concatenation Loop Optimization
+**Learning:** Manual string concatenation inside a loop (`tailJoined += ...`) causes inefficient memory reallocations, and nested tokenization loops (`for (token of tokenize(value))`) inside search matching functions incur heavy iteration overhead.
+**Action:** Replace string concatenation loops with array `split` and `join` operations, and replace inner tokenization loops with a single tokenization of a joined array (`tokenize(values.join(' '))`) to eliminate repetitive loops while retaining equivalent token matching logic.
