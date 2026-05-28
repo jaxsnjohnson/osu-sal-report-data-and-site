@@ -1854,7 +1854,7 @@ function renderInteractiveCharts(history) {
         <div id="historical-kpi-strip" class="historical-kpi-strip">
             <div class="historical-kpi">
                 <div class="historical-kpi-label">Latest Snapshot</div>
-                <div class="historical-kpi-value">${latestDateLabel}</div>
+                <div class="historical-kpi-value">${escapeHtml(latestDateLabel)}</div>
             </div>
             <div class="historical-kpi">
                 <div class="historical-kpi-label">Classified Headcount Share</div>
@@ -2152,7 +2152,7 @@ function renderInteractiveCharts(history) {
                     </div>
                     <button type="button" class="chart-fullscreen-btn" data-canvas-id="chart-indexed-pay" aria-label="View Indexed Per-Capita Pay in fullscreen">⛶</button>
                     <div class="historical-canvas-wrap"><canvas id="chart-indexed-pay"></canvas></div>
-                    <div class="stat-sub">${metrics.indexBaseDate ? `Base snapshot: ${formatDate(metrics.indexBaseDate)}.` : 'Insufficient baseline data.'} ${metrics.inflationAvailable ? 'CPI-adjusted.' : 'Nominal fallback (inflation data unavailable).'}</div>
+                    <div class="stat-sub">${metrics.indexBaseDate ? `Base snapshot: ${escapeHtml(formatDate(metrics.indexBaseDate))}.` : 'Insufficient baseline data.'} ${metrics.inflationAvailable ? 'CPI-adjusted.' : 'Nominal fallback (inflation data unavailable).'}</div>
                 </div>
                 <div class="stat-card historical-card">
                     <div class="chart-title-row">
@@ -3868,8 +3868,8 @@ function buildHistoryHTML(person, chartId, name) {
 
     return `
             <div class="history-meta" style="margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #444; font-size: 0.9rem; color: #a0a0a0;">
-                <strong>Hired:</strong> ${formatDate(person.Meta["First Hired"])} &nbsp;&bull;&nbsp;
-                <strong>Adj Service:</strong> ${formatDate(person.Meta["Adj Service Date"])}
+                <strong>Hired:</strong> ${escapeHtml(formatDate(person.Meta["First Hired"]))} &nbsp;&bull;&nbsp;
+                <strong>Adj Service:</strong> ${escapeHtml(formatDate(person.Meta["Adj Service Date"]))}
             </div>
             ${dataQualityHTML}
 
