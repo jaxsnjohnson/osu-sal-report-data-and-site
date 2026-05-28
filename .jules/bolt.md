@@ -53,3 +53,6 @@
 ## 2026-05-18 - Optimize Analytics Aggregations and Top-K Selection
 **Learning:** `calculateStats` was heavily utilized during search filtering. Creating frequency maps via raw JavaScript objects (`{}`) incurs prototype overhead. Additionally, flattening these objects into arrays with `Object.entries()` followed by a complete `Array.prototype.sort()` to extract only the top 4 or 5 items results in unneeded O(N log N) overhead and memory allocations.
 **Action:** Use ES6 `Map`s for high-frequency tracking (e.g., role counts). Replace `Array.sort().slice(0, K)` with an O(N) top-K linear scan function when `K` is small (like 4 or 5) to dramatically reduce sorting time and intermediate array allocations.
+## 2024-05-28 - Optimize dictionary-mode object iteration
+**Learning:** `for...in` loops in Node.js/V8 incur a significant performance penalty when iterating over very large objects that have fallen into dictionary mode (e.g., parsing large JSON payloads into Javascript maps). Furthermore, `Object.entries()` is inefficient as it allocates thousands of key-value tuples, increasing GC pressure.
+**Action:** Replace `for...in` loops with `Object.keys()` + native `for` loops when iterating over large datasets like the ones loaded by `loadBucket` to improve iteration speed and reduce V8 internal transition overhead.

@@ -4116,7 +4116,9 @@ function computeTransitionMemberIndex() {
     };
 
     const processBucketData = (bucketData) => {
-        for (const name in bucketData) {
+        const keys = Object.keys(bucketData);
+        for (let j = 0; j < keys.length; j++) {
+            const name = keys[j];
             const person = bucketData[name];
             if (!person || !person.Timeline || person.Timeline.length < 2) continue;
             hydratePersonDetail(person);
