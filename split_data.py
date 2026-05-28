@@ -676,11 +676,13 @@ def build_artifacts(data):
     # Build peer medians + percentiles
     peer_median_map = {}
     for date, bucket_map in peer_buckets.items():
-        peer_median_map[date] = {}
-        for key, values in bucket_map.items():
+        for values in bucket_map.values():
             # Sort once so median and percentile both reuse the same ordering.
             values.sort()
-            peer_median_map[date][key] = median(values, presorted=True)
+        peer_median_map[date] = {
+            key: median(values, presorted=True)
+            for key, values in bucket_map.items()
+        }
 
     # Compute per-person peer percentile (latest snapshot org+role)
     for name, idx in index.items():
