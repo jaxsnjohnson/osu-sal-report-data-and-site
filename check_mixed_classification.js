@@ -1,12 +1,25 @@
 const fs = require('fs').promises;
 const path = require('path');
 
+function getClassStateFromSource(source) {
+    const src = (source || '').toLowerCase();
+    const isUnclass = src.includes('unclass');
+    const isClassified = src.includes('class') && !isUnclass;
+    if (isUnclass) return 'unclassified';
+    if (isClassified) return 'classified';
+    return null;
+}
+
 async function loadAllPeople() {
     const dir = path.join(__dirname, 'data', 'people');
     const files = (await fs.readdir(dir)).filter(name => name.endsWith('.json'));
     const data = {};
-    for (const file of files) {
-        const chunk = JSON.parse(await fs.readFile(path.join(dir, file), 'utf8'));
+
+    const chunks = await Promise.all(
+        files.map(async file => JSON.parse(await fs.readFile(path.join(dir, file), 'utf8')))
+    );
+
+    for (const chunk of chunks) {
         Object.assign(data, chunk);
     }
     return data;
@@ -25,10 +38,10 @@ async function main() {
         let hasUnclassified = false;
 
         for (const snap of person.Timeline) {
-            const src = snap.Source.toLowerCase();
-            if (src.includes('unclass')) {
+            const state = getClassStateFromSource(snap.Source);
+            if (state === 'unclassified') {
                 hasUnclassified = true;
-            } else if (src.includes('class')) {
+            } else if (state === 'classified') {
                 hasClassified = true;
             }
             if (hasClassified && hasUnclassified) break;
@@ -37,9 +50,9 @@ async function main() {
         if (hasClassified && hasUnclassified) {
             mixedCount++;
             const lastSnap = person.Timeline[person.Timeline.length - 1];
-            const lastSrc = lastSnap.Source.toLowerCase();
+            const lastState = getClassStateFromSource(lastSnap.Source);
 
-            if (lastSrc.includes('unclass')) {
+            if (lastState === 'unclassified') {
                 classifiedToUnclassified++;
                 // console.log(`Mixed: ${key} is currently Unclassified`);
             } else {
