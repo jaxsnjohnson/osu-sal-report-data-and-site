@@ -5,8 +5,10 @@ async function loadAllPeople() {
     const dir = path.join(__dirname, 'data', 'people');
     const files = (await fs.readdir(dir)).filter(name => name.endsWith('.json'));
     const data = {};
-    for (const file of files) {
-        const chunk = JSON.parse(await fs.readFile(path.join(dir, file), 'utf8'));
+    const chunks = await Promise.all(
+        files.map(async file => JSON.parse(await fs.readFile(path.join(dir, file), 'utf8')))
+    );
+    for (const chunk of chunks) {
         Object.assign(data, chunk);
     }
     return data;
