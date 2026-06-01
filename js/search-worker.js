@@ -15,6 +15,8 @@ let editDistancePrev = new Uint32Array(0);
 let editDistanceCur = new Uint32Array(0);
 const EMPTY_UINT32 = new Uint32Array(0);
 
+const INVALID_REGEX_CHARS = /[()\\.*+?\[\]{}]/;
+
 const QUERY_RE = /[^a-z0-9]+/g;
 const normalizeText = (value) => {
     if (!value) return '';
@@ -196,8 +198,9 @@ const extractRegexLiteralBranches = (pattern) => {
         if (!(alternationBody.startsWith('(') && alternationBody.endsWith(')'))) return null;
         alternationBody = alternationBody.slice(1, -1);
         if (!alternationBody) return null;
-        if (alternationBody.includes('(') || alternationBody.includes(')')) return null;
     }
+
+    if (INVALID_REGEX_CHARS.test(alternationBody)) return null;
 
     const rawBranches = alternationBody.split('|');
     if (!rawBranches.length) return null;
@@ -206,14 +209,6 @@ const extractRegexLiteralBranches = (pattern) => {
     const seen = new Set();
     for (const branch of rawBranches) {
         if (!branch) return null;
-        for (let i = 0; i < branch.length; i++) {
-            const ch = branch[i];
-            if (ch === '\\') return null;
-            if (ch === '.' || ch === '*' || ch === '+' || ch === '?' ||
-                ch === '[' || ch === ']' || ch === '{' || ch === '}') {
-                return null;
-            }
-        }
 
         const literalNorm = normalizeText(branch);
         if (!literalNorm || literalNorm.length < REGEX_PREFILTER_MIN_LITERAL_LEN) continue;
