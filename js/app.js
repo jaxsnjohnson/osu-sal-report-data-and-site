@@ -1858,15 +1858,15 @@ function renderInteractiveCharts(history) {
             </div>
             <div class="historical-kpi">
                 <div class="historical-kpi-label">Classified Headcount Share</div>
-                <div class="historical-kpi-value">${fmtPct(kpis.classifiedHeadcountSharePct)}</div>
+                <div class="historical-kpi-value">${escapeHtml(fmtPct(kpis.classifiedHeadcountSharePct))}</div>
             </div>
             <div class="historical-kpi">
                 <div class="historical-kpi-label">Classified Payroll Share</div>
-                <div class="historical-kpi-value">${fmtPct(kpis.classifiedPayrollSharePct)}</div>
+                <div class="historical-kpi-value">${escapeHtml(fmtPct(kpis.classifiedPayrollSharePct))}</div>
             </div>
             <div class="historical-kpi">
                 <div class="historical-kpi-label">Per-Capita Gap (Unclass - Class)</div>
-                <div class="historical-kpi-value">${perCapitaGapLabel}</div>
+                <div class="historical-kpi-value">${escapeHtml(perCapitaGapLabel)}</div>
             </div>
         </div>
         <div id="historical-core-grid" class="historical-core-grid">
@@ -3726,16 +3726,16 @@ function updateDashboard(stats) {
 
     const tTotal = stats.tenure.t0_2 + stats.tenure.t2_5 + stats.tenure.t5_10 + stats.tenure.t10_plus || 1;
     els.tenureChart.innerHTML = `
-        <div class="tenure-seg t1" style="width:${(stats.tenure.t0_2 / tTotal) * 100}%" data-tooltip="< 2 Years: ${stats.tenure.t0_2}"></div>
-        <div class="tenure-seg t2" style="width:${(stats.tenure.t2_5 / tTotal) * 100}%" data-tooltip="2-5 Years: ${stats.tenure.t2_5}"></div>
-        <div class="tenure-seg t3" style="width:${(stats.tenure.t5_10 / tTotal) * 100}%" data-tooltip="5-10 Years: ${stats.tenure.t5_10}"></div>
-        <div class="tenure-seg t4" style="width:${(stats.tenure.t10_plus / tTotal) * 100}%" data-tooltip="10+ Years: ${stats.tenure.t10_plus}"></div>
+        <div class="tenure-seg t1" style="width:${(stats.tenure.t0_2 / tTotal) * 100}%" data-tooltip="&lt; 2 Years: ${escapeHtmlAttr(stats.tenure.t0_2)}"></div>
+        <div class="tenure-seg t2" style="width:${(stats.tenure.t2_5 / tTotal) * 100}%" data-tooltip="2-5 Years: ${escapeHtmlAttr(stats.tenure.t2_5)}"></div>
+        <div class="tenure-seg t3" style="width:${(stats.tenure.t5_10 / tTotal) * 100}%" data-tooltip="5-10 Years: ${escapeHtmlAttr(stats.tenure.t5_10)}"></div>
+        <div class="tenure-seg t4" style="width:${(stats.tenure.t10_plus / tTotal) * 100}%" data-tooltip="10+ Years: ${escapeHtmlAttr(stats.tenure.t10_plus)}"></div>
     `;
 
     const maxCount = stats.topOrgs[0] ? stats.topOrgs[0][1] : 1;
     els.orgLeaderboard.innerHTML = stats.topOrgs.map(([name, count]) => `
         <div class="lb-row"><div class="lb-label" data-tooltip="${escapeHtmlAttr(name)}">${escapeHtml(name)}</div>
-        <div class="lb-bar-container"><div class="lb-bar" style="width: ${(count/maxCount)*100}%"></div><div class="lb-val">${count}</div></div></div>
+        <div class="lb-bar-container"><div class="lb-bar" style="width: ${(count/maxCount)*100}%"></div><div class="lb-val">${escapeHtml(count)}</div></div></div>
     `).join('');
 
     updateDonut(stats.topRoles, stats.count);
