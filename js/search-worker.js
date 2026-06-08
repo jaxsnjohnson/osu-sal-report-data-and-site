@@ -183,6 +183,8 @@ const ensureRegexSearchAux = () => {
     return regexSearchAux;
 };
 
+const _invalidRegexBranchChars = /[\\.*+?\[\]{}]/;
+
 const extractRegexLiteralBranches = (pattern) => {
     if (!pattern) return null;
 
@@ -205,15 +207,7 @@ const extractRegexLiteralBranches = (pattern) => {
     const literals = [];
     const seen = new Set();
     for (const branch of rawBranches) {
-        if (!branch) return null;
-        for (let i = 0; i < branch.length; i++) {
-            const ch = branch[i];
-            if (ch === '\\') return null;
-            if (ch === '.' || ch === '*' || ch === '+' || ch === '?' ||
-                ch === '[' || ch === ']' || ch === '{' || ch === '}') {
-                return null;
-            }
-        }
+        if (!branch || _invalidRegexBranchChars.test(branch)) return null;
 
         const literalNorm = normalizeText(branch);
         if (!literalNorm || literalNorm.length < REGEX_PREFILTER_MIN_LITERAL_LEN) continue;
