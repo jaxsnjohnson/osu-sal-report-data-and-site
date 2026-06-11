@@ -53,3 +53,6 @@
 ## 2026-05-18 - Optimize Analytics Aggregations and Top-K Selection
 **Learning:** `calculateStats` was heavily utilized during search filtering. Creating frequency maps via raw JavaScript objects (`{}`) incurs prototype overhead. Additionally, flattening these objects into arrays with `Object.entries()` followed by a complete `Array.prototype.sort()` to extract only the top 4 or 5 items results in unneeded O(N log N) overhead and memory allocations.
 **Action:** Use ES6 `Map`s for high-frequency tracking (e.g., role counts). Replace `Array.sort().slice(0, K)` with an O(N) top-K linear scan function when `K` is small (like 4 or 5) to dramatically reduce sorting time and intermediate array allocations.
+## 2024-06-11 - Fast File Iteration with Promise.all and Native Loops
+**Learning:** Loading many JSON chunks sequentially and iterating through dictionary-like objects with `forEach` over `Object.keys()` is extremely slow. `fs.readFile` inside `for...of` loops prevents concurrent reads.
+**Action:** Always batch I/O bound tasks using `Promise.all` and native array iterations (e.g., standard `for (let i = 0; i < keys.length; i++)`) rather than `.forEach()` which introduces heavy call-stack overhead and reduces V8's optimization capabilities in hot loops over massive keysets.
