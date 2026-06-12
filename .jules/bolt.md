@@ -53,3 +53,7 @@
 ## 2026-05-18 - Optimize Analytics Aggregations and Top-K Selection
 **Learning:** `calculateStats` was heavily utilized during search filtering. Creating frequency maps via raw JavaScript objects (`{}`) incurs prototype overhead. Additionally, flattening these objects into arrays with `Object.entries()` followed by a complete `Array.prototype.sort()` to extract only the top 4 or 5 items results in unneeded O(N log N) overhead and memory allocations.
 **Action:** Use ES6 `Map`s for high-frequency tracking (e.g., role counts). Replace `Array.sort().slice(0, K)` with an O(N) top-K linear scan function when `K` is small (like 4 or 5) to dramatically reduce sorting time and intermediate array allocations.
+
+## 2024-06-12 - Hot Loop Function Overhead (calculateStats)
+**Learning:** During heavy filtering loops over large datasets (e.g., `calculateStats` over `state.filteredKeys`), repeatedly invoking helper functions like `personOrg(p)` causes measurable performance degradation due to function call overhead.
+**Action:** Inline or cache properties like `p._lastJob['Job Orgn']` and `p.Meta['Home Orgn']` directly within hot loops instead of abstracting property resolution into separate function calls.
