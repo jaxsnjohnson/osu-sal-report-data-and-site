@@ -53,3 +53,11 @@
 ## 2026-05-18 - Optimize Analytics Aggregations and Top-K Selection
 **Learning:** `calculateStats` was heavily utilized during search filtering. Creating frequency maps via raw JavaScript objects (`{}`) incurs prototype overhead. Additionally, flattening these objects into arrays with `Object.entries()` followed by a complete `Array.prototype.sort()` to extract only the top 4 or 5 items results in unneeded O(N log N) overhead and memory allocations.
 **Action:** Use ES6 `Map`s for high-frequency tracking (e.g., role counts). Replace `Array.sort().slice(0, K)` with an O(N) top-K linear scan function when `K` is small (like 4 or 5) to dramatically reduce sorting time and intermediate array allocations.
+
+## 2026-06-13 - Node.js File I/O Optimization
+**Learning:** In Node.js scripts (like `check_mixed_classification.js`), parsing multiple JSON files sequentially inside a `for...of` loop creates a severe I/O bottleneck due to synchronous-like waiting.
+**Action:** Always batch file loading and JSON parsing using `Promise.all` combined with `.map()` for concurrent operations when processing multiple files. This significantly reduces I/O wait times and improves execution speed.
+
+## 2026-06-13 - Iterate Over Object Keys Efficiently
+**Learning:** Iterating over object properties using `Object.keys(obj).forEach()` incurs callback overhead for every iteration and adds minor garbage collection pressure, which becomes measurable over large datasets.
+**Action:** Replace `Object.keys(obj).forEach()` with standard, indexed `for` loops (e.g., `const keys = Object.keys(obj); for (let i = 0; i < keys.length; i++)`) in hot paths and data scripts.
