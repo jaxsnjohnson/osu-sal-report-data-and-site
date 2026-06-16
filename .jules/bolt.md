@@ -53,3 +53,7 @@
 ## 2026-05-18 - Optimize Analytics Aggregations and Top-K Selection
 **Learning:** `calculateStats` was heavily utilized during search filtering. Creating frequency maps via raw JavaScript objects (`{}`) incurs prototype overhead. Additionally, flattening these objects into arrays with `Object.entries()` followed by a complete `Array.prototype.sort()` to extract only the top 4 or 5 items results in unneeded O(N log N) overhead and memory allocations.
 **Action:** Use ES6 `Map`s for high-frequency tracking (e.g., role counts). Replace `Array.sort().slice(0, K)` with an O(N) top-K linear scan function when `K` is small (like 4 or 5) to dramatically reduce sorting time and intermediate array allocations.
+
+## 2026-05-18 - Avoid Object.keys().forEach() in Analytics Loops
+**Learning:** `check_mixed_classification.js` processed all user timelines using `Object.keys(data).forEach()`. Iterating over potentially large parsed JSON datasets using Array `forEach` on keys creates unnecessary callback allocations and garbage collection pressure in a hot loop context.
+**Action:** Replace `Object.keys().forEach()` with native `for` loops (e.g. `const keys = Object.keys(data); for (let i = 0; i < keys.length; i++)`) in backend scripts that perform deep data analytics to minimize iteration overhead.
