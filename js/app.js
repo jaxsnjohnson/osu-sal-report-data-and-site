@@ -1445,9 +1445,6 @@ Promise.all([
                 }
                 p._hiredDateTs = ts;
             }
-
-            p._cachedOrg = (p.Meta && p.Meta['Home Orgn']) || (p._lastJob && p._lastJob['Job Orgn']) || 'Unknown';
-            p._cachedRole = (p._lastJob && p._lastJob['Job Title']) || 'Unknown';
         }
 
         buildKeyBucketsAndCola();
@@ -3661,10 +3658,19 @@ function calculateStats(keys) {
         if (salary > 0) salaries.push(salary);
         if (p._isUnclass) unclassified++; else classified++;
 
-        const org = p._cachedOrg;
+        let org = p._cachedOrg;
+        if (org === undefined) {
+            org = personOrg(p) || 'Unknown';
+            p._cachedOrg = org;
+        }
         orgs.set(org, (orgs.get(org) || 0) + 1);
         
-        const role = p._cachedRole;
+        let role = p._cachedRole;
+        if (role === undefined) {
+            const lastJob = p._lastJob || {};
+            role = lastJob['Job Title'] || 'Unknown';
+            p._cachedRole = role;
+        }
         roles.set(role, (roles.get(role) || 0) + 1);
 
         // Optimization: Use pre-parsed _hiredDateTs

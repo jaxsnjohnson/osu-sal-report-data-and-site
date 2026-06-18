@@ -46,7 +46,7 @@
 ## 2024-05-10 - Regex Compilation Caching
 **Learning:** Instantiating `RegExp` objects repeatedly inside a high-frequency loop (or rapidly called function like a search parser) causes measurable performance overhead.
 **Action:** Introduced an LRU-style map cache (`_regexCache`) in `js/search-worker.js` for `parseQuery` to cache compiled `RegExp` instances based on the raw query string. Care must be taken to safely reset `lastIndex = 0` for cached expressions to prevent state bleeding.
-## $(date +%Y-%m-%d) - Pre-compile regexes in Python parsing scripts
+## 2026-06-18 - Pre-compile regexes in Python parsing scripts
 **Learning:** Python's `re.search`, `re.split`, and `re.findall` with inline string patterns compile the regexes on every execution. In high-frequency loops (e.g., parsing 50,000 text blocks per file), this causes significant CPU overhead.
 **Action:** Pre-compiled all frequently used regex patterns (`re.compile(...)`) at the module level in `scripts/salary_report_parser.py` and used the compiled objects' `.search`, `.split`, and `.findall` methods, resulting in a ~22% speedup.
 
@@ -92,3 +92,7 @@
 ## 2026-06-18 - Pre-compiled RegExp for Multi-Character Validation
 **Learning:** String scanning for multiple invalid characters using iterative `.includes()` checks or explicit character-by-character loops inside `extractRegexLiteralBranches` causes significant CPU overhead in hot paths compared to using V8's optimized regex engine.
 **Action:** Replace multiple `.includes()` checks and individual character comparisons with a module-level pre-compiled RegExp (e.g., `/[()\\.*+?\[\]{}]/.test(str)`). This leverages the native regex engine, consistently improving parsing speed by ~20%.
+
+## 2026-06-18 - Optimize Heavy Object Property Access
+**Learning:** In high-frequency iteration loops (like `calculateStats`), repeatedly accessing deep properties (e.g., `p._lastJob['Job Title']`) or evaluating derived fields with fallback chains (e.g., `personOrg(p)`) introduces N+1 performance bottlenecks due to property lookups and function call overhead.
+**Action:** When evaluating static or slowly-changing derived properties over large datasets during frequent filtering cycles, add inline caching (e.g., `p._cachedOrg`, `p._cachedRole`) to reduce functional bottlenecks into O(1) object property lookups.
