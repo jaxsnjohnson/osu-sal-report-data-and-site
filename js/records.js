@@ -1,6 +1,11 @@
 const escapeHtmlAttr = (value) => {
     if (value === null || value === undefined) return '';
-    return value.toString().replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    return value.toString()
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 };
 
 const escapeHtml = (value) => {
