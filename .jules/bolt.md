@@ -76,3 +76,11 @@
 ## 2024-06-12 - Hot Loop Function Overhead (calculateStats)
 **Learning:** During heavy filtering loops over large datasets (e.g., `calculateStats` over `state.filteredKeys`), repeatedly invoking helper functions like `personOrg(p)` causes measurable performance degradation due to function call overhead.
 **Action:** Inline or cache properties like `p._lastJob['Job Orgn']` and `p.Meta['Home Orgn']` directly within hot loops instead of abstracting property resolution into separate function calls.
+
+## 2026-06-13 - Node.js File I/O Optimization
+**Learning:** In Node.js scripts (like `check_mixed_classification.js`), parsing multiple JSON files sequentially inside a `for...of` loop creates a severe I/O bottleneck due to synchronous-like waiting.
+**Action:** Always batch file loading and JSON parsing using `Promise.all` combined with `.map()` for concurrent operations when processing multiple files. This significantly reduces I/O wait times and improves execution speed.
+
+## 2026-06-13 - Iterate Over Object Keys Efficiently
+**Learning:** Iterating over object properties using `Object.keys(obj).forEach()` incurs callback overhead for every iteration and adds minor garbage collection pressure, which becomes measurable over large datasets.
+**Action:** Replace `Object.keys(obj).forEach()` with standard, indexed `for` loops (e.g., `const keys = Object.keys(obj); for (let i = 0; i < keys.length; i++)`) in hot paths and data scripts.

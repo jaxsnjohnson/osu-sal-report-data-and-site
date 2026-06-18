@@ -14,11 +14,12 @@ async function loadAllPeople() {
     const dir = path.join(__dirname, 'data', 'people');
     const files = (await fs.readdir(dir)).filter(name => name.endsWith('.json'));
     const data = {};
-    const chunks = await Promise.all(
-        files.map(async file => JSON.parse(await fs.readFile(path.join(dir, file), 'utf8')))
-    );
-    for (const chunk of chunks) {
-        Object.assign(data, chunk);
+    const chunks = await Promise.all(files.map(async file => {
+        const chunk = await fs.readFile(path.join(dir, file), 'utf8');
+        return JSON.parse(chunk);
+    }));
+    for (let i = 0; i < chunks.length; i++) {
+        Object.assign(data, chunks[i]);
     }
     return data;
 }
@@ -37,11 +38,13 @@ async function main() {
         let hasClassified = false;
         let hasUnclassified = false;
 
-        for (const snap of person.Timeline) {
-            const state = getClassStateFromSource(snap.Source);
-            if (state === 'unclassified') {
+        const timeline = person.Timeline;
+        for (let j = 0; j < timeline.length; j++) {
+            const snap = timeline[j];
+            const currentState = getClassStateFromSource(snap.Source);
+            if (currentState === 'unclassified') {
                 hasUnclassified = true;
-            } else if (state === 'classified') {
+            } else if (currentState === 'classified') {
                 hasClassified = true;
             }
             if (hasClassified && hasUnclassified) break;
@@ -49,13 +52,13 @@ async function main() {
 
         if (hasClassified && hasUnclassified) {
             mixedCount++;
-            const lastSnap = person.Timeline[person.Timeline.length - 1];
+            const lastSnap = timeline[timeline.length - 1];
             const lastState = getClassStateFromSource(lastSnap.Source);
 
             if (lastState === 'unclassified') {
                 classifiedToUnclassified++;
                 // console.log(`Mixed: ${key} is currently Unclassified`);
-            } else {
+            } else if (lastState === 'classified') {
                 unclassifiedToClassified++;
                 // console.log(`Mixed: ${key} is currently Classified`);
             }
