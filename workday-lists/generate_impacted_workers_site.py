@@ -63,15 +63,14 @@ def parse_shared_strings(archive: ZipFile) -> list[str]:
     root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
     shared_strings: list[str] = []
 
+    ns = SPREADSHEET_NS["a"]
+    t_tag = f"{{{ns}}}t"
+
     for si in root.iterfind("a:si", SPREADSHEET_NS):
         parts: list[str] = []
-        text_node = si.find("a:t", SPREADSHEET_NS)
-        if text_node is not None and text_node.text:
-            parts.append(text_node.text)
-        for run in si.iterfind("a:r", SPREADSHEET_NS):
-            run_text = run.find("a:t", SPREADSHEET_NS)
-            if run_text is not None and run_text.text:
-                parts.append(run_text.text)
+        for t in si.iter(t_tag):
+            if t.text:
+                parts.append(t.text)
         shared_strings.append("".join(parts))
 
     return shared_strings
@@ -79,7 +78,10 @@ def parse_shared_strings(archive: ZipFile) -> list[str]:
 
 def cell_text(cell: ET.Element, shared_strings: list[str]) -> str:
     cell_type = cell.attrib.get("t", "")
-    value_node = cell.find("a:v", SPREADSHEET_NS)
+
+    ns = SPREADSHEET_NS["a"]
+    v_tag = f"{{{ns}}}v"
+    value_node = cell.find(v_tag)
 
     if cell_type == "s":
         if value_node is None or not value_node.text:
@@ -88,8 +90,14 @@ def cell_text(cell: ET.Element, shared_strings: list[str]) -> str:
         return shared_strings[index] if index < len(shared_strings) else ""
 
     if cell_type == "inlineStr":
-        inline_text = cell.find("a:is/a:t", SPREADSHEET_NS)
-        return inline_text.text if inline_text is not None and inline_text.text else ""
+        is_tag = f"{{{ns}}}is"
+        t_tag = f"{{{ns}}}t"
+        is_node = cell.find(is_tag)
+        if is_node is not None:
+            t_node = is_node.find(t_tag)
+            if t_node is not None and t_node.text:
+                return t_node.text
+        return ""
 
     if value_node is None or value_node.text is None:
         return ""
@@ -104,13 +112,17 @@ def read_workbook_rows(workbook_path: Path) -> list[dict[str, str]]:
     header: dict[str, str] = {}
     rows: list[dict[str, str]] = []
 
+    ns = SPREADSHEET_NS["a"]
+    c_tag = f"{{{ns}}}c"
+    column_match_re = re.compile(r"([A-Z]+)")
+
     for row_index, row_node in enumerate(
         worksheet.iterfind(".//a:sheetData/a:row", SPREADSHEET_NS), start=1
     ):
         by_column: dict[str, str] = {}
-        for cell in row_node.iterfind("a:c", SPREADSHEET_NS):
+        for cell in row_node.iter(c_tag):
             reference = cell.attrib.get("r", "")
-            column_match = re.match(r"([A-Z]+)", reference)
+            column_match = column_match_re.match(reference)
             if not column_match:
                 continue
             by_column[column_match.group(1)] = cell_text(cell, shared_strings).strip()
