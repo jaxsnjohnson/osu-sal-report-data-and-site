@@ -60,3 +60,7 @@
 ## 2026-05-18 - String Concatenation Loop Optimization
 **Learning:** Manual string concatenation inside a loop (`tailJoined += ...`) causes inefficient memory reallocations, and nested tokenization loops (`for (token of tokenize(value))`) inside search matching functions incur heavy iteration overhead.
 **Action:** Replace string concatenation loops with array `split` and `join` operations, and replace inner tokenization loops with a single tokenization of a joined array (`tokenize(values.join(' '))`) to eliminate repetitive loops while retaining equivalent token matching logic.
+
+## 2024-05-29 - Optimize Nested Dictionary Construction in split_data.py
+**Learning:** In Python, constructing a dictionary using a nested `for` loop with intermediate assignments (`dict[k] = {}`) and inner loops is generally slower than using dictionary comprehensions. Even when an in-place operation like `.sort()` is required, splitting the logic into two passes—a fast outer loop strictly for `.sort()` and a subsequent dictionary comprehension for mapping—can yield small performance gains due to Python's optimized `MAP_ADD` opcode.
+**Action:** Replaced the nested loops for building `peer_median_map` in `split_data.py` with a two-pass approach: an initial fast loop to sort the values in-place, followed by a dictionary comprehension to compute and map the medians.
