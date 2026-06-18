@@ -68,3 +68,7 @@
 ## 2025-02-12 - XML element parsing overhead
 **Learning:** Using `ElementTree.iterfind` and `.find` with namespace strings (e.g. `a:t`) triggers the expensive XPath compiler inside hot loops, making XML traversal very slow for large documents like `sharedStrings.xml` and `sheet1.xml`.
 **Action:** Replace `iterfind` and `.find` in hot loops with `.iter(tag)` and `.find(tag)` using directly formatted URI tags (e.g., `f"{{{SPREADSHEET_NS['a']}}}t"`). This simple string formatting bypasses the XPath engine, yielding over 30-70% performance improvements depending on node depth and size.
+
+## 2024-06-11 - Fast File Iteration with Promise.all and Native Loops
+**Learning:** Loading many JSON chunks sequentially and iterating through dictionary-like objects with `forEach` over `Object.keys()` is extremely slow. `fs.readFile` inside `for...of` loops prevents concurrent reads.
+**Action:** Always batch I/O bound tasks using `Promise.all` and native array iterations (e.g., standard `for (let i = 0; i < keys.length; i++)`) rather than `.forEach()` which introduces heavy call-stack overhead and reduces V8's optimization capabilities in hot loops over massive keysets.
