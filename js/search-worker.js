@@ -317,25 +317,10 @@ const buildOrgAliases = (orgValue) => {
 
     if (text.indexOf('-') === -1) return aliases;
 
-    let firstPart = '';
-    let tailJoined = '';
-    let nonEmptyCount = 0;
-    let start = 0;
-
-    for (let i = 0; i <= text.length; i++) {
-        if (i !== text.length && text.charCodeAt(i) !== 45) continue;
-        const part = text.slice(start, i).trim();
-        if (part) {
-            if (nonEmptyCount === 0) firstPart = part;
-            else tailJoined += (tailJoined ? ' ' : '') + part;
-            nonEmptyCount++;
-        }
-        start = i + 1;
-    }
-
-    if (nonEmptyCount) {
-        const code = normalizeText(firstPart);
-        const tail = normalizeText(tailJoined);
+    const parts = text.split('-').map(s => s.trim()).filter(Boolean);
+    if (parts.length > 0) {
+        const code = normalizeText(parts[0]);
+        const tail = normalizeText(parts.slice(1).join(' '));
         if (code) aliases.push(code);
         if (tail) {
             aliases.push(tail);
@@ -562,19 +547,10 @@ const matchesFieldTerm = (term, values, preTokens) => {
     }
 
     const maxDist = term.length <= 5 ? 1 : 2;
-    if (preTokens) {
-        for (const token of preTokens) {
-            if (token.length < 3) continue;
-            if (boundedEditDistance(term, token, maxDist) <= maxDist) return true;
-        }
-        return false;
-    }
-
-    for (const value of values) {
-        for (const token of tokenize(value)) {
-            if (token.length < 3) continue;
-            if (boundedEditDistance(term, token, maxDist) <= maxDist) return true;
-        }
+    const tokensToSearch = preTokens || tokenize(values.join(' '));
+    for (const token of tokensToSearch) {
+        if (token.length < 3) continue;
+        if (boundedEditDistance(term, token, maxDist) <= maxDist) return true;
     }
     return false;
 };
