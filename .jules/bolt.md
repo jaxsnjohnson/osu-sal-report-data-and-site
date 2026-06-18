@@ -84,3 +84,7 @@
 ## 2026-06-13 - Iterate Over Object Keys Efficiently
 **Learning:** Iterating over object properties using `Object.keys(obj).forEach()` incurs callback overhead for every iteration and adds minor garbage collection pressure, which becomes measurable over large datasets.
 **Action:** Replace `Object.keys(obj).forEach()` with standard, indexed `for` loops (e.g., `const keys = Object.keys(obj); for (let i = 0; i < keys.length; i++)`) in hot paths and data scripts.
+
+## 2026-05-18 - Avoid Object.keys().forEach() in Analytics Loops
+**Learning:** `check_mixed_classification.js` processed all user timelines using `Object.keys(data).forEach()`. Iterating over potentially large parsed JSON datasets using Array `forEach` on keys creates unnecessary callback allocations and garbage collection pressure in a hot loop context.
+**Action:** Replace `Object.keys().forEach()` with native `for` loops (e.g. `const keys = Object.keys(data); for (let i = 0; i < keys.length; i++)`) in backend scripts that perform deep data analytics to minimize iteration overhead.
