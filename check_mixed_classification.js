@@ -30,7 +30,9 @@ async function main() {
     let classifiedToUnclassified = 0;
     let unclassifiedToClassified = 0;
 
-    Object.keys(data).forEach(key => {
+    const keys = Object.keys(data);
+    for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
         const person = data[key];
         let hasClassified = false;
         let hasUnclassified = false;
@@ -58,7 +60,7 @@ async function main() {
                 // console.log(`Mixed: ${key} is currently Classified`);
             }
         }
-    });
+    }
 
     console.log(`Total mixed classification: ${mixedCount}`);
     console.log(`Currently Unclassified (was Classified): ${classifiedToUnclassified}`);
