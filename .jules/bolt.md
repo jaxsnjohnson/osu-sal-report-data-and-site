@@ -72,3 +72,7 @@
 ## 2024-06-11 - Fast File Iteration with Promise.all and Native Loops
 **Learning:** Loading many JSON chunks sequentially and iterating through dictionary-like objects with `forEach` over `Object.keys()` is extremely slow. `fs.readFile` inside `for...of` loops prevents concurrent reads.
 **Action:** Always batch I/O bound tasks using `Promise.all` and native array iterations (e.g., standard `for (let i = 0; i < keys.length; i++)`) rather than `.forEach()` which introduces heavy call-stack overhead and reduces V8's optimization capabilities in hot loops over massive keysets.
+
+## 2024-06-12 - Hot Loop Function Overhead (calculateStats)
+**Learning:** During heavy filtering loops over large datasets (e.g., `calculateStats` over `state.filteredKeys`), repeatedly invoking helper functions like `personOrg(p)` causes measurable performance degradation due to function call overhead.
+**Action:** Inline or cache properties like `p._lastJob['Job Orgn']` and `p.Meta['Home Orgn']` directly within hot loops instead of abstracting property resolution into separate function calls.
