@@ -207,7 +207,8 @@ const extractRegexLiteralBranches = (pattern) => {
 
     const literals = [];
     const seen = new Set();
-    for (const branch of rawBranches) {
+    for (let i = 0; i < rawBranches.length; i++) {
+        const branch = rawBranches[i];
         if (!branch) return null;
 
         const literalNorm = normalizeText(branch);
