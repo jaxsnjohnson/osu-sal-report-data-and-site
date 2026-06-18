@@ -56,3 +56,7 @@
 ## 2024-05-28 - Optimize dictionary-mode object iteration
 **Learning:** `for...in` loops in Node.js/V8 incur a significant performance penalty when iterating over very large objects that have fallen into dictionary mode (e.g., parsing large JSON payloads into Javascript maps). Furthermore, `Object.entries()` is inefficient as it allocates thousands of key-value tuples, increasing GC pressure.
 **Action:** Replace `for...in` loops with `Object.keys()` + native `for` loops when iterating over large datasets like the ones loaded by `loadBucket` to improve iteration speed and reduce V8 internal transition overhead.
+
+## 2026-05-18 - String Concatenation Loop Optimization
+**Learning:** Manual string concatenation inside a loop (`tailJoined += ...`) causes inefficient memory reallocations, and nested tokenization loops (`for (token of tokenize(value))`) inside search matching functions incur heavy iteration overhead.
+**Action:** Replace string concatenation loops with array `split` and `join` operations, and replace inner tokenization loops with a single tokenization of a joined array (`tokenize(values.join(' '))`) to eliminate repetitive loops while retaining equivalent token matching logic.
