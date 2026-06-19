@@ -110,6 +110,7 @@
 
   const includeRe = /(associate director|assistant director|senior director|director|manager|head|chair)/i;
   const excludeRe = /(vice president|provost|chancellor|president|chief|dean)/i;
+  const commaSpaceRe = /[,\s]/g;
 
   try {
     const aggResp = await fetch('data/aggregates.json');
@@ -129,24 +130,35 @@
       const resp = await fetch(`data/people/${bucket}.json`);
       if (!resp.ok) return;
       const data = await resp.json();
-      Object.values(data).forEach(person => {
-        (person.Timeline || []).forEach(snap => {
+      const keys = Object.keys(data);
+      for (let i = 0; i < keys.length; i++) {
+        const person = data[keys[i]];
+        const timeline = person.Timeline || [];
+        for (let j = 0; j < timeline.length; j++) {
+          const snap = timeline[j];
           const entry = seriesByDate[snap.Date];
-          if (!entry) return;
+          if (!entry) continue;
+
           const jobs = snap.Jobs || [];
-          const titles = jobs.map(j => (j['Job Title'] || '')).join(' | ');
-          const isUpper = includeRe.test(titles) && !excludeRe.test(titles);
+          let isUpper = false;
+          let calcPay = 0;
+
+          if (jobs.length > 0) {
+            let titles = '';
+            for (let k = 0; k < jobs.length; k++) {
+              const jJob = jobs[k];
+              titles += (jJob['Job Title'] || '') + (k < jobs.length - 1 ? ' | ' : '');
+
+              const rateStr = String(jJob['Annual Salary Rate'] || '');
+              const pctStr = String(jJob['Appt Percent'] || '');
+              const rate = parseFloat(rateStr.replace(commaSpaceRe, '')) || 0;
+              const pct = parseFloat(pctStr.replace(commaSpaceRe, '')) || 0;
+              if (rate > 0 && pct > 0) calcPay += rate * (pct / 100);
+            }
+            isUpper = includeRe.test(titles) && !excludeRe.test(titles);
+          }
+
           const pay = snap._pay || snap.pay || null; // in case future fields appear
-          // Fallback: recompute pay from jobs
-          const calcPay = (() => {
-            let total = 0;
-            jobs.forEach(j => {
-              const rate = parseFloat(String(j['Annual Salary Rate']||'').replace(/[,\s]/g,'')) || 0;
-              const pct = parseFloat(String(j['Appt Percent']||'').replace(/[,\s]/g,'')) || 0;
-              if (rate > 0 && pct > 0) total += rate * (pct/100);
-            });
-            return total;
-          })();
           const payVal = pay || calcPay;
           entry.total += 1;
           entry.payrollTotal += payVal;
@@ -154,8 +166,8 @@
             entry.upper += 1;
             entry.payrollUpper += payVal;
           }
-        });
-      });
+        }
+      }
     }));
 
     // Prepare arrays for charts
