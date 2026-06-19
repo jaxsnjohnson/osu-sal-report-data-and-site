@@ -96,3 +96,6 @@
 ## 2026-06-18 - Optimize Heavy Object Property Access
 **Learning:** In high-frequency iteration loops (like `calculateStats`), repeatedly accessing deep properties (e.g., `p._lastJob['Job Title']`) or evaluating derived fields with fallback chains (e.g., `personOrg(p)`) introduces N+1 performance bottlenecks due to property lookups and function call overhead.
 **Action:** When evaluating static or slowly-changing derived properties over large datasets during frequent filtering cycles, add inline caching (e.g., `p._cachedOrg`, `p._cachedRole`) to reduce functional bottlenecks into O(1) object property lookups.
+## 2026-06-19 - Hoist regular expressions out of nested loops in UI Analytics
+**Learning:** In frontend analytics reports like `upper-middle-mang-report.html`, compiling ad-hoc regular expressions (e.g., `/[,\s]/g` for stripping commas in salary formats) inside the innermost loop for every parsed job causes unnecessary CPU overhead.
+**Action:** When performing string sanitization inside hot paths/deeply nested loops, hoist the `RegExp` literal (e.g., `const commaSpaceRe = /[,\s]/g;`) out of the loops to eliminate repeated compilation.
