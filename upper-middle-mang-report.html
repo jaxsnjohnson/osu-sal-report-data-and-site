@@ -110,6 +110,7 @@
 
   const includeRe = /(associate director|assistant director|senior director|director|manager|head|chair)/i;
   const excludeRe = /(vice president|provost|chancellor|president|chief|dean)/i;
+  const commaSpaceRe = /[,\s]/g;
 
   try {
     const aggResp = await fetch('data/aggregates.json');
@@ -129,10 +130,13 @@
       const resp = await fetch(`data/people/${bucket}.json`);
       if (!resp.ok) return;
       const data = await resp.json();
-      Object.values(data).forEach(person => {
-        (person.Timeline || []).forEach(snap => {
+      for (const personId in data) {
+        const person = data[personId];
+        const timeline = person.Timeline || [];
+        for (let i = 0; i < timeline.length; i++) {
+          const snap = timeline[i];
           const entry = seriesByDate[snap.Date];
-          if (!entry) return;
+          if (!entry) continue;
           const jobs = snap.Jobs || [];
           const titles = jobs.map(j => (j['Job Title'] || '')).join(' | ');
           const isUpper = includeRe.test(titles) && !excludeRe.test(titles);
@@ -140,11 +144,12 @@
           // Fallback: recompute pay from jobs
           const calcPay = (() => {
             let total = 0;
-            jobs.forEach(j => {
-              const rate = parseFloat(String(j['Annual Salary Rate']||'').replace(/[,\s]/g,'')) || 0;
-              const pct = parseFloat(String(j['Appt Percent']||'').replace(/[,\s]/g,'')) || 0;
+            for (let k = 0; k < jobs.length; k++) {
+              const j = jobs[k];
+              const rate = parseFloat(String(j['Annual Salary Rate']||'').replace(commaSpaceRe,'')) || 0;
+              const pct = parseFloat(String(j['Appt Percent']||'').replace(commaSpaceRe,'')) || 0;
               if (rate > 0 && pct > 0) total += rate * (pct/100);
-            });
+            }
             return total;
           })();
           const payVal = pay || calcPay;
@@ -154,8 +159,8 @@
             entry.upper += 1;
             entry.payrollUpper += payVal;
           }
-        });
-      });
+        }
+      }
     }));
 
     // Prepare arrays for charts
