@@ -66,7 +66,8 @@ def parse_shared_strings(archive: ZipFile) -> list[str]:
     ns = SPREADSHEET_NS["a"]
     t_tag = f"{{{ns}}}t"
 
-    for si in root.iterfind("a:si", SPREADSHEET_NS):
+    si_tag = f"{{{ns}}}si"
+    for si in root.iter(si_tag):
         parts: list[str] = []
         for t in si.iter(t_tag):
             if t.text:
@@ -114,10 +115,11 @@ def read_workbook_rows(workbook_path: Path) -> list[dict[str, str]]:
 
     ns = SPREADSHEET_NS["a"]
     c_tag = f"{{{ns}}}c"
+    row_tag = f"{{{ns}}}row"
     column_match_re = re.compile(r"([A-Z]+)")
 
     for row_index, row_node in enumerate(
-        worksheet.iterfind(".//a:sheetData/a:row", SPREADSHEET_NS), start=1
+        worksheet.iter(row_tag), start=1
     ):
         by_column: dict[str, str] = {}
         for cell in row_node.iter(c_tag):
