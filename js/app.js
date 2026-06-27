@@ -4695,6 +4695,6 @@ function showToast(msg) {
 function renderSuggestedSearches() {
     if (!els.suggestedSearches) return;
     els.suggestedSearches.innerHTML = ['Professor', 'Athletics', 'Physics', 'Coach', 'Dean'].map(term =>
-        `<button class="chip" onclick="applySearch('${term}', 'suggested_chip')">${term}</button>`
+        `<button class="chip" onclick="applySearch('${escapeHtmlAttr(escapeForSingleQuote(term))}', 'suggested_chip')">${escapeHtml(term)}</button>`
     ).join('');
 }
