@@ -66,14 +66,15 @@ document.addEventListener('DOMContentLoaded', () => {
         searchInput.focus();
     });
 
-    filterChips.forEach(chip => {
+    for (let i = 0; i < filterChips.length; i++) {
+        const chip = filterChips[i];
         chip.addEventListener('click', () => {
-            filterChips.forEach(c => c.classList.remove('active'));
+            for (let j = 0; j < filterChips.length; j++) filterChips[j].classList.remove('active');
             chip.classList.add('active');
             currentFilter = chip.getAttribute('data-filter');
             renderRecords();
         });
-    });
+    }
 
     function toggleClearBtn(val) {
         if (val.length > 0) clearBtn.classList.remove('hidden');

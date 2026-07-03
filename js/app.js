@@ -407,8 +407,8 @@ const buildSearchIndex = (names, roles) => {
         const tokens = key.match(/[a-z0-9]+/g) || [];
         index.push({ value, key, type, tokens });
     };
-    names.forEach(name => addItem(name, 'name'));
-    roles.forEach(role => addItem(role, 'role'));
+    for (let i = 0; i < names.length; i++) addItem(names[i], 'name');
+    for (let i = 0; i < roles.length; i++) addItem(roles[i], 'role');
     index.sort((a, b) => a.key < b.key ? -1 : (a.key > b.key ? 1 : 0));
     return index;
 };
@@ -502,11 +502,11 @@ const searchSuggestionBkTree = (root, query, maxDist, out) => {
 
         const minEdge = dist - maxDist;
         const maxEdge = dist + maxDist;
-        node.children.forEach((child, edgeDist) => {
+        for (const [edgeDist, child] of node.children) {
             if (edgeDist >= minEdge && edgeDist <= maxEdge) {
                 stack.push(child);
             }
-        });
+        }
     }
     return out;
 };
@@ -564,15 +564,15 @@ const buildSearchSuggestionAux = (index) => {
     }
 
     let fuzzyTokenBkTree = null;
-    tokenBuckets.forEach((_, token) => {
+    for (const token of tokenBuckets.keys()) {
         fuzzyTokenBkTree = insertSuggestionBkTree(fuzzyTokenBkTree, token);
-    });
+    }
 
     const toTypedMap = (src) => {
         const out = new Map();
-        src.forEach((refs, key) => {
+        for (const [key, refs] of src.entries()) {
             out.set(key, Uint32Array.from(refs));
-        });
+        }
         return out;
     };
 
@@ -762,13 +762,13 @@ const buildWorkerBaseKey = (names) => {
 
 const rejectAllPendingSearches = (reason) => {
     const err = reason instanceof Error ? reason : new Error(reason || 'Search worker reset');
-    state.searchPending.forEach((pending) => {
+    for (const pending of state.searchPending.values()) {
         pending.reject(err);
-    });
+    }
     state.searchPending.clear();
-    state.searchPingPending.forEach((pending) => {
+    for (const pending of state.searchPingPending.values()) {
         pending.reject(err);
-    });
+    }
     state.searchPingPending.clear();
 };
 
@@ -1477,7 +1477,8 @@ Promise.all([
 
         inflationReady.then(() => {
             refreshInflationControls();
-            document.querySelectorAll('.card.expanded').forEach(card => rebuildPersonChart(card));
+            const cards = document.querySelectorAll('.card.expanded');
+            for (let i = 0; i < cards.length; i++) rebuildPersonChart(cards[i]);
         });
 
         if (targetName) {
@@ -2900,13 +2901,14 @@ function ensurePersonChart(cardEl) {
     const jobChangePoints = [];
     let roleStartIdx = 0;
     let prevTitle = null;
-    person.Timeline.forEach((s, idx) => {
+    for (let idx = 0; idx < person.Timeline.length; idx++) {
+        const s = person.Timeline[idx];
         const primaryJob = (s.Jobs && s.Jobs.length > 0) ? s.Jobs[0] : null;
         const title = primaryJob ? (primaryJob['Job Title'] || '') : '';
         if (idx === 0) {
             jobChangePoints.push(null);
             prevTitle = title;
-            return;
+            continue;
         }
         if (title && prevTitle && title !== prevTitle) {
             jobChangePoints.push(primarySeries[idx]);
@@ -2915,7 +2917,7 @@ function ensurePersonChart(cardEl) {
             jobChangePoints.push(null);
         }
         prevTitle = title || prevTitle;
-    });
+    }
     const hasJobChanges = jobChangePoints.some(val => val !== null);
 
     const roleStartDate = labels[roleStartIdx] || labels[0];
@@ -2977,7 +2979,8 @@ function ensurePersonChart(cardEl) {
             const xScale = chart.scales.x;
             const yScale = chart.scales.y;
 
-            gapSegments.forEach(seg => {
+            for (let i = 0; i < gapSegments.length; i++) {
+                const seg = gapSegments[i];
                 const xLeft = xScale.getPixelForValue(labels[seg.leftIdx]);
                 const xRight = xScale.getPixelForValue(labels[seg.rightIdx]);
                 const xMid = (xLeft + xRight) / 2;
@@ -3004,9 +3007,10 @@ function ensurePersonChart(cardEl) {
                 }
 
                 ctx.restore();
-            });
+            }
 
-            colaBands.forEach(band => {
+            for (let i = 0; i < colaBands.length; i++) {
+                const band = colaBands[i];
                 const xStart = xScale.getPixelForValue(labels[band.beforeIdx]);
                 const xEnd = xScale.getPixelForValue(labels[band.afterIdx]);
                 const left = Math.min(xStart, xEnd);
@@ -3015,7 +3019,7 @@ function ensurePersonChart(cardEl) {
                 ctx.fillStyle = 'rgba(168, 85, 247, 0.08)';
                 ctx.fillRect(left, yScale.top, width, yScale.bottom - yScale.top);
                 ctx.restore();
-            });
+            }
         }
     };
 
@@ -3541,11 +3545,13 @@ function stepAutocomplete(delta) {
     const len = state.autocompleteItems.length;
     state.autocompleteFocus = (state.autocompleteFocus + delta + len) % len;
     if (!els.autocomplete) return;
-    els.autocomplete.querySelectorAll('.autocomplete-item').forEach((node, idx) => {
+    const nodes = els.autocomplete.querySelectorAll('.autocomplete-item');
+    for (let idx = 0; idx < nodes.length; idx++) {
+        const node = nodes[idx];
         const isActive = idx === state.autocompleteFocus;
         node.classList.toggle('active', isActive);
         node.setAttribute('aria-selected', isActive ? 'true' : 'false');
-    });
+    }
 }
 
 function updateSearchUrl() {
@@ -4292,8 +4298,10 @@ function getRecordGaps(person) {
 
 function refreshInflationControls() {
     if (!hasInflationData()) return;
-    document.querySelectorAll('.trend-mode').forEach(select => {
-        if (select.dataset.ready === 'true') return;
+    const selects = document.querySelectorAll('.trend-mode');
+    for (let i = 0; i < selects.length; i++) {
+        const select = selects[i];
+        if (select.dataset.ready === 'true') continue;
         select.dataset.ready = 'true';
         select.disabled = false;
         select.innerHTML = `
@@ -4301,14 +4309,17 @@ function refreshInflationControls() {
             <option value="adjusted">Inflation: Adjusted (graph wide)</option>
             <option value="compare">Inflation: Adjusted (separate line)</option>
         `;
-    });
+    }
 }
 window.handleCardKey = function(e, id) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCard(id); } };
 
 let observer;
 function setupInfiniteScroll() {
     observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => { if (entry.isIntersecting && state.visibleCount < state.filteredKeys.length) appendNextBatch(); });
+        for (let i = 0; i < entries.length; i++) {
+            const entry = entries[i];
+            if (entry.isIntersecting && state.visibleCount < state.filteredKeys.length) appendNextBatch();
+        }
     }, { root: null, rootMargin: '100px', threshold: 0.1 });
 }
 function observeSentinel() {
@@ -4587,10 +4598,14 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('close-modal').addEventListener('click', () => modal.classList.add('hidden'));
         window.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape') modal.classList.add('hidden'); });
-        document.querySelectorAll('.collapsible-btn').forEach(btn => btn.addEventListener('click', () => {
-            btn.setAttribute('aria-expanded', !(btn.getAttribute('aria-expanded') === 'true'));
-            btn.nextElementSibling.classList.toggle('hidden');
-        }));
+        const btns = document.querySelectorAll('.collapsible-btn');
+        for (let i = 0; i < btns.length; i++) {
+            const btn = btns[i];
+            btn.addEventListener('click', () => {
+                btn.setAttribute('aria-expanded', !(btn.getAttribute('aria-expanded') === 'true'));
+                btn.nextElementSibling.classList.toggle('hidden');
+            });
+        }
     }
 
     document.body.addEventListener('change', (e) => {
