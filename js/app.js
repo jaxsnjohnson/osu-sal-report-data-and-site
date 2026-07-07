@@ -3952,7 +3952,7 @@ function generateCardHTML(name, idx) {
         : '';
     const exclusionTooltip = 'Possible exclusion (classified → unclassified at some point).';
     const exclusionWarningHTML = person._wasExcluded
-        ? `<span class="exclusion-warning" data-tooltip="${exclusionTooltip}">E</span>`
+        ? `<span class="exclusion-warning" data-tooltip="${escapeHtmlAttr(exclusionTooltip)}">E</span>`
         : '';
     const dataFlags = [];
     if (person._payMissing) dataFlags.push('Missing salary rate in one or more appointments.');
@@ -3979,7 +3979,7 @@ function generateCardHTML(name, idx) {
                 <p>Home Org: ${highlightedHomeOrg}</p>
             </div>
             <div class="latest-stat">
-                <div class="latest-salary" data-tooltip="${totalPayTooltip}">${totalPayLabel}</div>
+                <div class="latest-salary" data-tooltip="${escapeHtmlAttr(totalPayTooltip)}">${totalPayLabel}</div>
                 <div class="latest-role">${highlightedRole}</div>
                 ${dataFlagHTML}
             </div>
