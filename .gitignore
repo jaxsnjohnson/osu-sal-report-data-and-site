@@ -2,6 +2,11 @@
 .DS_Store
 data.json
 temp_txt/
+
+# Keep private Workday/RFI inputs and generated worker reports out of Git.
+/workday-lists/*
+!/workday-lists/generate_impacted_workers_site.py
+
 .venv/bin/activate
 .venv/bin/activate.csh
 .venv/bin/activate.fish
