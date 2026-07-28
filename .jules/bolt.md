@@ -99,3 +99,6 @@
 ## 2026-06-19 - Hoist regular expressions out of nested loops in UI Analytics
 **Learning:** In frontend analytics reports like `upper-middle-mang-report.html`, compiling ad-hoc regular expressions (e.g., `/[,\s]/g` for stripping commas in salary formats) inside the innermost loop for every parsed job causes unnecessary CPU overhead.
 **Action:** When performing string sanitization inside hot paths/deeply nested loops, hoist the `RegExp` literal (e.g., `const commaSpaceRe = /[,\s]/g;`) out of the loops to eliminate repeated compilation.
+## 2026-07-03 - Optimize Array and Map Iterator Performance
+**Learning:** Using `forEach` to iterate over Arrays, Maps, and Map iterators (like `.keys()`, `.values()`, `.entries()`) in Javascript incurs noticeable function callback and memory allocation overhead compared to standard `for` loops and `for...of` loops, particularly in hot paths like searching and indexing.
+**Action:** Replace `Array.prototype.forEach` and `Map.prototype.forEach` with native `for` loops (e.g., `for (let i = 0; i < arr.length; i++)`) and `for...of` loops (e.g., `for (const [key, value] of map.entries())`) in high-frequency iteration blocks to avoid callback overhead.
