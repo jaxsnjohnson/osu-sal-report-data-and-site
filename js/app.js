@@ -1812,7 +1812,13 @@ function renderInteractiveCharts(history) {
         const exactMetrics = comparisonHistory === history
             ? metrics
             : buildHistoricalLaborMetrics(history, []);
-        const exactByDate = new Map((exactMetrics.points || []).map(point => [point.date, point]));
+
+        const exactByDate = new Map();
+        const _exactPoints = exactMetrics.points || [];
+        for (let i = 0; i < _exactPoints.length; i++) {
+            exactByDate.set(_exactPoints[i].date, _exactPoints[i]);
+        }
+
         const points = metrics.points || [];
         const latest = metrics.latest || null;
         const kpis = metrics.kpis || {};

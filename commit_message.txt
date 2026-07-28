@@ -1,5 +1,6 @@
-🚨 Severity: HIGH
-💡 Vulnerability: DOM XSS in Inline JavaScript Event Handlers. `escapeForSingleQuote` was escaping only single quotes and backslashes for use in inline event handlers (e.g. `onclick="applySearch('${value}')"`). The browser parses and decodes HTML entities inside attribute values *before* the JavaScript runtime executes the handler. By providing an entity like `&apos;`, an attacker can break out of the string context in the decoded JavaScript string.
-🎯 Impact: Attackers can execute arbitrary JavaScript in the context of the user's session if they control search suggestions or other parameters interpolated into inline handlers.
-🔧 Fix: Updated `escapeForSingleQuote` in `js/app.js` to also escape HTML entities (`&`, `<`, `>`, `"`) to prevent entity decoding bypass. Also ensured `applySearch` inline calls inside `js/app.js` correctly nest `escapeHtmlAttr(escapeForSingleQuote(value))`.
-✅ Verification: Created and ran a Playwright test injecting `&apos;` via `page.evaluate()` directly into `window.state.autocompleteItems` and verified that clicking the item no longer executed the injected payload.
+⚡ Bolt: Optimize exactByDate Map allocation
+
+💡 What: Replaced the intermediate array map allocation `new Map((exactMetrics.points || []).map(...))` with a manual `for` loop and `.set()` calls when initializing `exactByDate`.
+🎯 Why: Creating an intermediate array (by mapping over `exactMetrics.points`) just to initialize a `Map` creates unnecessary object allocations (`[date, point]` arrays) and subsequent garbage collection overhead.
+📊 Impact: Reduces memory footprint and garbage collection pressure during the hot path of building historical charts.
+🔬 Measurement: Run `./run_benchmark.sh` to ensure correctness hasn't regressed, and observe slightly faster rendering in the frontend when processing large historical datasets.
