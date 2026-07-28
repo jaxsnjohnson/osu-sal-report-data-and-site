@@ -1,5 +1,5 @@
 🚨 Severity: HIGH
-💡 Vulnerability: DOM XSS in Inline JavaScript Event Handlers. `escapeForSingleQuote` was escaping only single quotes and backslashes for use in inline event handlers (e.g. `onclick="applySearch('${value}')"`). The browser parses and decodes HTML entities inside attribute values *before* the JavaScript runtime executes the handler. By providing an entity like `&apos;`, an attacker can break out of the string context in the decoded JavaScript string.
-🎯 Impact: Attackers can execute arbitrary JavaScript in the context of the user's session if they control search suggestions or other parameters interpolated into inline handlers.
-🔧 Fix: Updated `escapeForSingleQuote` in `js/app.js` to also escape HTML entities (`&`, `<`, `>`, `"`) to prevent entity decoding bypass. Also ensured `applySearch` inline calls inside `js/app.js` correctly nest `escapeHtmlAttr(escapeForSingleQuote(value))`.
-✅ Verification: Created and ran a Playwright test injecting `&apos;` via `page.evaluate()` directly into `window.state.autocompleteItems` and verified that clicking the item no longer executed the injected payload.
+💡 Vulnerability: DOM XSS via unescaped string injection in array map inside `innerHTML`. The `renderSuggestedSearches` method mapped over an array and interpolated the `term` directly into button content and `onclick` inline event handlers without any sanitization.
+🎯 Impact: While the current array is hardcoded to safe strings, if the array ever became dynamic (e.g. pulled from user search history or URL params), it would immediately introduce a critical DOM XSS vulnerability.
+🔧 Fix: Wrapped the `term` interpolation inside the `onclick` attribute with `escapeHtmlAttr(escapeForSingleQuote(term))` and the text content with `escapeHtml(term)`.
+✅ Verification: Ran Playwright test script verifying payload properly escaped. Tests run cleanly.
